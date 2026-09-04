@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SlopeWatch — offline landslide reporter</title>
+<link rel="manifest" href="./manifest.json">
+<meta name="theme-color" content="#0f1b12">
+<style>
+  :root {
+    --bg: #0f1b12;
+    --card: #16261a;
+    --text: #f2f5ee;
+    --muted: #a9bba6;
+    --low: #5a9c5a;
+    --medium: #d9a441;
+    --high: #d9534f;
+    --accent: #c97b3a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    /* Large base size + high contrast: legible on a cheap phone in sunlight */
+    font-size: 18px;
+    line-height: 1.4;
+    padding-bottom: 3rem;
+  }
+  header {
+    padding: 1rem;
+    text-align: center;
+    border-bottom: 1px solid #2a3a2b;
+  }
+  header h1 { margin: 0; font-size: 1.4rem; }
+  header p { margin: 0.25rem 0 0; color: var(--muted); font-size: 0.9rem; }
+  main { max-width: 480px; margin: 0 auto; padding: 1rem; }
+  video, canvas#captureCanvas { width: 100%; border-radius: 12px; background: #000; }
+  canvas#captureCanvas { display: none; }
+  #cameraError { color: var(--medium); font-size: 0.9rem; }
+  form { margin-top: 1rem; }
+  label { display: block; margin: 1rem 0 0.35rem; font-weight: 600; }
+  select, textarea {
+    width: 100%;
+    padding: 0.75rem;
+    border-radius: 10px;
+    border: 1px solid #2a3a2b;
+    background: var(--card);
+    color: var(--text);
+    font-size: 1rem;
+  }
+  textarea { min-height: 4rem; resize: vertical; }
+  button {
+    width: 100%;
+    margin-top: 1.25rem;
+    padding: 1rem;
+    border: none;
+    border-radius: 12px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 1.1rem;
+    font-weight: 700;
+  }
+  button:active { opacity: 0.85; }
+  #status { margin-top: 0.75rem; color: var(--muted); min-height: 1.5em; }
+  #reportList { list-style: none; padding: 0; margin-top: 1.5rem; }
+  .report-item {
+    background: var(--card);
+    border-left: 6px solid var(--muted);
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+    margin-bottom: 0.75rem;
+  }
+  .report-item.severity-low { border-left-color: var(--low); }
+  .report-item.severity-medium { border-left-color: var(--medium); }
+  .report-item.severity-high { border-left-color: var(--high); }
+  .sync-badge {
+    float: right;
+    font-size: 0.75rem;
+    color: var(--muted);
+    text-transform: uppercase;
+  }
+  .report-item p { margin: 0.4rem 0; }
+  .report-item small { color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🏔️ SlopeWatch</h1>
+  <p>Offline landslide observation reporter · works with no signal</p>
+</header>
+
+<main>
+  <video id="camera" autoplay playsinline muted></video>
+  <canvas id="captureCanvas"></canvas>
+  <p id="cameraError"></p>
+
+  <form id="reportForm">
+    <label for="severity">What do you see?</label>
+    <select id="severity" required>
+      <option value="low">Low — small crack / damp patch</option>
+      <option value="medium">Medium — wide crack / active seepage / leaning tree</option>
+      <option value="high">High — fresh debris / bulging wall / big crack across road</option>
+    </select>
+
+    <label for="notes">Notes (optional)</label>
+    <textarea id="notes" placeholder="e.g. near the bend below Sarsaly, water running across the road"></textarea>
+
+    <label for="lang">Explain this in</label>
+    <select id="lang">
+      <option value="en">English</option>
+      <option value="ne">नेपाली (Nepali)</option>
+      <option value="hi">हिन्दी (Hindi)</option>
+      <option value="bn">বাংলা (Bengali)</option>
+    </select>
+
+    <button type="submit">📍 Log this observation</button>
+    <p id="status"></p>
+  </form>
+
+  <h2>Your reports</h2>
+  <ul id="reportList"></ul>
+</main>
+
+<script src="./app.js"></script>
+</body>
+</html>
