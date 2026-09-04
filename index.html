@@ -325,6 +325,53 @@
   .guide-tier.tier-medium { border-color: rgba(251, 191, 36, 0.3); color: var(--medium); }
   .guide-tier.tier-high { border-color: rgba(248, 113, 113, 0.3); color: var(--high); }
 
+  .guide-tier.active.tier-low {
+    background: var(--low-bg);
+    border-color: var(--low);
+    box-shadow: 0 0 8px rgba(74, 222, 128, 0.45), inset 0 0 6px rgba(74, 222, 128, 0.1);
+    color: var(--low);
+  }
+  .guide-tier.active.tier-medium {
+    background: var(--medium-bg);
+    border-color: var(--medium);
+    box-shadow: 0 0 8px rgba(251, 191, 36, 0.45), inset 0 0 6px rgba(251, 191, 36, 0.1);
+    color: var(--medium);
+  }
+  .guide-tier.active.tier-high {
+    background: var(--high-bg);
+    border-color: var(--high);
+    box-shadow: 0 0 8px rgba(248, 113, 113, 0.45), inset 0 0 6px rgba(248, 113, 113, 0.1);
+    color: var(--high);
+  }
+
+  /* AI backend badge */
+  .ai-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    padding: 0.2rem 0.55rem;
+    border-radius: 9999px;
+    border: 1px solid var(--border);
+    background: var(--card-subtle);
+    color: var(--muted);
+  }
+  .ai-badge.ai-nano   { border-color: #1d4ed8; background: #0f1d40; color: #93c5fd; }
+  .ai-badge.ai-gpu    { border-color: #7c3aed; background: #1e0f40; color: #c4b5fd; }
+  .ai-badge.ai-wasm   { border-color: #0d7e6e; background: #0a2824; color: #6ee7b7; }
+  .ai-badge.ai-template { border-color: var(--border); color: var(--muted); }
+  .ai-badge.ai-loading  { border-color: var(--border); color: var(--muted); }
+
+  .guide-tier.active.tier-high {
+    background: var(--high-bg);
+    border-color: var(--high);
+    box-shadow: 0 0 8px rgba(248, 113, 113, 0.45), inset 0 0 6px rgba(248, 113, 113, 0.1);
+    color: var(--high);
+  }
+
   /* Tactile Action Buttons */
   button {
     font-family: var(--font-sans);
@@ -593,10 +640,13 @@
       <h1 class="brand-title">
         🏔️ Slope<span class="title-accent">Watch</span>
       </h1>
-      <span id="netBadge" class="status-pill offline">
-        <span class="status-dot"></span>
-        <span id="netText">OFFLINE STORAGE</span>
-      </span>
+      <div style="display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+        <span id="aiBadge" class="ai-badge ai-loading">⏳ AI LOADING</span>
+        <span id="netBadge" class="status-pill offline">
+          <span class="status-dot"></span>
+          <span id="netText">OFFLINE STORAGE</span>
+        </span>
+      </div>
     </div>
     <p class="header-desc">Darjeeling hill slope observer · logs observations with zero cell signal</p>
   </div>
@@ -652,6 +702,12 @@
     <button type="button" id="installBtn" hidden>📲 Install SlopeWatch on this device</button>
     <p id="status"></p>
   </form>
+
+  <div style="margin-top:1rem;text-align:center">
+    <a href="./relay.html" style="color:var(--muted);font-size:0.85rem;text-decoration:none;font-family:var(--font-mono)">
+      📡 RELAY MODE — broadcast alerts peer-to-peer →
+    </a>
+  </div>
 
   <div class="section-header-wrap">
     <h2 id="reportsHeading">Your reports</h2>

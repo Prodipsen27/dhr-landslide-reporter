@@ -1,5 +1,7 @@
 'use strict';
 
+// ─── IndexedDB ────────────────────────────────────────────────────────────────
+
 const DB_NAME = 'slopewatch';
 const STORE = 'reports';
 
@@ -63,11 +65,95 @@ async function markSynced(id) {
   });
 }
 
-async function classifySeverity(_imageBitmap, manualSeverity) {
-  return manualSeverity;
+// ─── MediaPipe Image Classifier ───────────────────────────────────────────────
+// Maps general EfficientNet-Lite ImageNet labels to slope-hazard severity.
+// No custom training needed — we exploit the labels that correlate with the
+// four hazard types we care about (crack → low/medium, mud/debris → high, etc.)
+
+const MEDIAPIPE_VISION_URL =
+  'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/wasm';
+const EFFICIENTNET_MODEL_URL =
+  'https://storage.googleapis.com/mediapipe-models/image_classifier/efficientnet_lite0/float32/1/efficientnet_lite0.tflite';
+
+// ImageNet label fragments → severity mapping (order matters — checked top-down)
+const LABEL_SEVERITY_MAP = [
+  // High: active collapse / fresh debris / water
+  { fragment: 'mud', severity: 'high' },
+  { fragment: 'landslide', severity: 'high' },
+  { fragment: 'rubble', severity: 'high' },
+  { fragment: 'debris', severity: 'high' },
+  { fragment: 'gravel', severity: 'high' },
+  { fragment: 'cliff', severity: 'high' },
+  // Medium: visible structural stress
+  { fragment: 'wall', severity: 'medium' },
+  { fragment: 'concrete', severity: 'medium' },
+  { fragment: 'stone', severity: 'medium' },
+  { fragment: 'rock', severity: 'medium' },
+  { fragment: 'water', severity: 'medium' },
+  { fragment: 'seep', severity: 'medium' },
+  { fragment: 'moss', severity: 'medium' },
+  { fragment: 'soil', severity: 'medium' },
+  // Low: vegetation / minor surface features
+  { fragment: 'grass', severity: 'low' },
+  { fragment: 'slope', severity: 'low' },
+  { fragment: 'hill', severity: 'low' },
+  { fragment: 'terrain', severity: 'low' },
+];
+
+let mpClassifier = null;
+let mpLoading = false;
+
+async function loadMediaPipeClassifier() {
+  if (mpClassifier) return mpClassifier;
+  if (mpLoading) return null;
+  mpLoading = true;
+  try {
+    const { ImageClassifier, FilesetResolver } = await import(
+      'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/vision_bundle.mjs'
+    );
+    const vision = await FilesetResolver.forVisionTasks(MEDIAPIPE_VISION_URL);
+    mpClassifier = await ImageClassifier.createFromOptions(vision, {
+      baseOptions: { modelAssetPath: EFFICIENTNET_MODEL_URL, delegate: 'CPU' },
+      maxResults: 5,
+      scoreThreshold: 0.05,
+    });
+    updateAIBadge();
+    return mpClassifier;
+  } catch (err) {
+    console.warn('MediaPipe classifier failed to load:', err);
+    mpLoading = false;
+    return null;
+  }
 }
 
-// --- Fallback templates in all 4 languages -----------------------------------
+function mapLabelsToSeverity(classifications) {
+  const cats = classifications?.[0]?.categories ?? [];
+  for (const { categoryName } of cats) {
+    const lower = categoryName.toLowerCase();
+    for (const { fragment, severity } of LABEL_SEVERITY_MAP) {
+      if (lower.includes(fragment)) return severity;
+    }
+  }
+  return null; // no match → keep manual selection
+}
+
+async function classifySeverity(photoDataUrl, manualSeverity) {
+  if (!photoDataUrl) return manualSeverity;
+  const classifier = await loadMediaPipeClassifier();
+  if (!classifier) return manualSeverity;
+  try {
+    const img = new Image();
+    await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = photoDataUrl; });
+    const result = classifier.classify(img);
+    const suggested = mapLabelsToSeverity(result.classifications);
+    return suggested || manualSeverity;
+  } catch (err) {
+    console.warn('Image classification error:', err);
+    return manualSeverity;
+  }
+}
+
+// ─── Fallback templates (all 4 languages) ─────────────────────────────────────
 
 const SEVERITY_TEMPLATES = {
   low: {
@@ -90,29 +176,84 @@ const SEVERITY_TEMPLATES = {
   }
 };
 
-// --- On-device LLM explanation -----------------------------------------------
+// ─── On-device LLM (auto-selected by device capability) ───────────────────────
+//
+// Priority:
+//   1. Chrome Prompt API (Gemini Nano) — 0 MB, best quality, flagship only
+//   2. Transformers.js via WebGPU     — ~270 MB, fast GPU path, mid-range+
+//   3. Transformers.js via WASM       — ~270 MB, universal, slower
+//   4. Curated templates              — 0 MB, instant, all devices
 
-let llmSession = null;
+let llmBackend = null;  // 'gemini-nano' | 'transformers-gpu' | 'transformers-wasm' | 'template'
+let llmSession = null;  // Gemini Nano session
+let tfPipeline = null;  // Transformers.js pipeline
 
-async function getLLMSession() {
-  if (llmSession) return llmSession;
-  if (!('LanguageModel' in self)) return null;
+const SYSTEM_PROMPT =
+  'You are a slope-safety advisor for the Darjeeling hills in West Bengal, India. ' +
+  'You explain landslide warning signs in plain, calm language suitable for a worried villager ' +
+  'reading on a small phone screen. Always respond in the requested language only. ' +
+  'Keep answers to exactly 2 short sentences.';
+
+async function tryGeminiNano() {
+  if (!('LanguageModel' in self)) return false;
   try {
     const avail = await LanguageModel.availability();
-    if (avail === 'unavailable') return null;
+    if (avail !== 'readily') return false;
     llmSession = await LanguageModel.create({
-      systemPrompt:
-        'You are a slope-safety advisor for the Darjeeling hills in West Bengal, India. ' +
-        'You explain landslide warning signs in plain, calm language suitable for a worried villager ' +
-        'reading on a small phone screen. Always respond in the requested language only. ' +
-        'Keep answers to exactly 2 short sentences.',
+      systemPrompt: SYSTEM_PROMPT,
       temperature: 0.3,
-      topK: 3
+      topK: 3,
     });
-    return llmSession;
-  } catch {
-    return null;
+    llmBackend = 'gemini-nano';
+    return true;
+  } catch { return false; }
+}
+
+async function tryTransformersJS(useGPU) {
+  try {
+    const { pipeline, env } = await import(
+      'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.4.2/dist/transformers.min.js'
+    );
+    env.allowRemoteModels = true;
+    env.useBrowserCache = true;
+    const device = useGPU ? 'webgpu' : 'wasm';
+    // SmolLM2-135M-Instruct: 270MB, fast, multilingual enough for short prompts
+    tfPipeline = await pipeline('text-generation', 'HuggingFaceTB/SmolLM2-135M-Instruct', {
+      device,
+      dtype: 'q4',
+    });
+    llmBackend = useGPU ? 'transformers-gpu' : 'transformers-wasm';
+    return true;
+  } catch { return false; }
+}
+
+async function initLLM() {
+  if (llmBackend) return;
+  updateAIBadge('loading');
+
+  if (await tryGeminiNano()) { updateAIBadge(); return; }
+
+  const hasWebGPU = 'gpu' in navigator;
+  if (hasWebGPU && await tryTransformersJS(true)) { updateAIBadge(); return; }
+  if (await tryTransformersJS(false)) { updateAIBadge(); return; }
+
+  llmBackend = 'template';
+  updateAIBadge();
+}
+
+async function runLLMPrompt(prompt) {
+  if (llmBackend === 'gemini-nano') {
+    return await llmSession.prompt(prompt);
   }
+  if (llmBackend === 'transformers-gpu' || llmBackend === 'transformers-wasm') {
+    const messages = [
+      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'user', content: prompt },
+    ];
+    const out = await tfPipeline(messages, { max_new_tokens: 120, temperature: 0.3 });
+    return out[0]?.generated_text?.at(-1)?.content ?? '';
+  }
+  return null;
 }
 
 async function explainWithLLM(severity, notes, lang, location) {
@@ -120,11 +261,9 @@ async function explainWithLLM(severity, notes, lang, location) {
   const langLabel = { en: 'English', ne: 'Nepali', hi: 'Hindi', bn: 'Bengali' }[lang] || 'English';
   const fallbackText = fallback[lang] || fallback.en;
 
-  const session = await getLLMSession();
-  if (!session) {
-    const suffix = lang === 'en' ? ' (on-device model unavailable — showing a plain-language template instead.)' : '';
-    return fallbackText + suffix;
-  }
+  if (!llmBackend) await initLLM();
+
+  if (llmBackend === 'template') return fallbackText;
 
   try {
     let prompt =
@@ -133,18 +272,37 @@ async function explainWithLLM(severity, notes, lang, location) {
     if (location) {
       prompt += `Location: approximately ${location.lat.toFixed(4)}°N, ${location.lng.toFixed(4)}°E. `;
     }
-    prompt +=
-      `In ${langLabel}, write 2 short sentences: what this likely means, and what the person should do right now.`;
-    return await session.prompt(prompt);
+    prompt += `In ${langLabel}, write 2 short sentences: what this likely means, and what the person should do right now.`;
+
+    const result = await runLLMPrompt(prompt);
+    return result || fallbackText;
   } catch (err) {
-    console.warn('LLM explanation failed, using template fallback:', err);
-    llmSession = null;
-    const suffix = lang === 'en' ? ' (on-device model error — showing a template instead.)' : '';
-    return fallbackText + suffix;
+    console.warn('LLM prompt failed, using template:', err);
+    llmSession = null; tfPipeline = null; llmBackend = 'template';
+    updateAIBadge();
+    return fallbackText;
   }
 }
 
-// --- Sync --------------------------------------------------------------------
+// ─── AI status badge ──────────────────────────────────────────────────────────
+
+function updateAIBadge(state) {
+  const badge = document.getElementById('aiBadge');
+  if (!badge) return;
+  const s = state || llmBackend || 'loading';
+  const MAP = {
+    'loading':           { cls: 'ai-loading',  dot: '⏳', label: 'AI LOADING' },
+    'gemini-nano':       { cls: 'ai-nano',      dot: '✦',  label: 'GEMINI NANO' },
+    'transformers-gpu':  { cls: 'ai-gpu',       dot: '⚡', label: 'ON-DEVICE · GPU' },
+    'transformers-wasm': { cls: 'ai-wasm',      dot: '🔧', label: 'ON-DEVICE · WASM' },
+    'template':          { cls: 'ai-template',  dot: '📋', label: 'TEMPLATE MODE' },
+  };
+  const cfg = MAP[s] || MAP['loading'];
+  badge.className = 'ai-badge ' + cfg.cls;
+  badge.textContent = cfg.dot + ' ' + cfg.label;
+}
+
+// ─── Sync ─────────────────────────────────────────────────────────────────────
 
 async function trySync(statusEl) {
   if (!navigator.onLine) {
@@ -153,18 +311,13 @@ async function trySync(statusEl) {
   }
   const reports = await getAllReports();
   const pending = reports.filter((r) => !r.synced);
-  if (pending.length === 0) {
-    statusEl.textContent = 'All reports synced.';
-    return;
-  }
-  for (const r of pending) {
-    await markSynced(r.id);
-  }
+  if (pending.length === 0) { statusEl.textContent = 'All reports synced.'; return; }
+  for (const r of pending) await markSynced(r.id);
   statusEl.textContent = `Synced ${pending.length} report(s).`;
   renderReportList();
 }
 
-// --- UI ----------------------------------------------------------------------
+// ─── Camera ───────────────────────────────────────────────────────────────────
 
 let stream = null;
 
@@ -174,6 +327,8 @@ async function startCamera() {
   try {
     stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
     video.srcObject = stream;
+    // Start loading MediaPipe in background as soon as camera is up
+    loadMediaPipeClassifier();
   } catch (err) {
     if (cameraWrap) cameraWrap.hidden = true;
     document.getElementById('cameraError').textContent =
@@ -187,15 +342,13 @@ function captureFrame() {
   const maxW = 1280;
   let w = video.videoWidth || 640;
   let h = video.videoHeight || 480;
-  if (w > maxW) {
-    h = Math.round(h * (maxW / w));
-    w = maxW;
-  }
-  canvas.width = w;
-  canvas.height = h;
+  if (w > maxW) { h = Math.round(h * (maxW / w)); w = maxW; }
+  canvas.width = w; canvas.height = h;
   canvas.getContext('2d').drawImage(video, 0, 0, w, h);
   return canvas.toDataURL('image/jpeg', 0.7);
 }
+
+// ─── Geolocation ──────────────────────────────────────────────────────────────
 
 async function getLocation() {
   return new Promise((resolve) => {
@@ -207,6 +360,8 @@ async function getLocation() {
     );
   });
 }
+
+// ─── Report list UI ───────────────────────────────────────────────────────────
 
 function formatTime(ts) {
   const diff = Date.now() - ts;
@@ -221,13 +376,11 @@ async function renderReportList() {
   const heading = document.getElementById('reportsHeading');
   const reports = await getAllReports();
   const sorted = reports.sort((a, b) => b.createdAt - a.createdAt);
-
   const queued = reports.filter((r) => !r.synced).length;
-  if (reports.length === 0) {
-    heading.textContent = 'Your reports';
-  } else {
-    heading.textContent = `Your reports (${reports.length}${queued ? ' · ' + queued + ' queued' : ''})`;
-  }
+
+  heading.textContent = reports.length === 0
+    ? 'Your reports'
+    : `Your reports (${reports.length}${queued ? ' · ' + queued + ' queued' : ''})`;
 
   list.innerHTML = '';
 
@@ -268,10 +421,7 @@ async function renderReportList() {
     del.textContent = '✕';
     del.title = 'Delete this report';
     del.setAttribute('aria-label', 'Delete report');
-    del.addEventListener('click', async () => {
-      await deleteReport(r.id);
-      renderReportList();
-    });
+    del.addEventListener('click', async () => { await deleteReport(r.id); renderReportList(); });
     right.appendChild(del);
     row.appendChild(right);
     li.appendChild(row);
@@ -298,30 +448,38 @@ async function renderReportList() {
   }
 }
 
+// ─── Submit ───────────────────────────────────────────────────────────────────
+
 async function handleSubmit(e) {
   e.preventDefault();
   const btn = document.getElementById('submitBtn');
   const statusEl = document.getElementById('status');
-  const severity = document.getElementById('severity').value;
+  const severityEl = document.getElementById('severity');
   const notes = document.getElementById('notes').value;
   const lang = document.getElementById('lang').value;
 
   btn.disabled = true;
   btn.textContent = '⏳ Saving…';
-  statusEl.textContent = 'Thinking through this offline…';
+  statusEl.textContent = 'Analysing photo and generating explanation offline…';
 
   try {
     const photo = stream ? captureFrame() : null;
-    const finalSeverity = await classifySeverity(photo, severity);
-    const location = await getLocation();
-    const explanation = await explainWithLLM(finalSeverity, notes, lang, location);
 
-    await saveReport({ severity: finalSeverity, notes, lang, photo, location, explanation });
+    // MediaPipe may suggest a different severity from the photo
+    const suggestedSeverity = await classifySeverity(photo, severityEl.value);
+    if (suggestedSeverity !== severityEl.value) {
+      severityEl.value = suggestedSeverity;
+      updateGuideGlow(suggestedSeverity);
+    }
+
+    const location = await getLocation();
+    const explanation = await explainWithLLM(suggestedSeverity, notes, lang, location);
+
+    await saveReport({ severity: suggestedSeverity, notes, lang, photo, location, explanation });
 
     document.getElementById('notes').value = '';
     statusEl.textContent = 'Saved locally. Will sync automatically when online.';
     renderReportList();
-
     if (navigator.onLine) trySync(statusEl);
   } finally {
     btn.disabled = false;
@@ -329,7 +487,7 @@ async function handleSubmit(e) {
   }
 }
 
-// --- Install prompt ----------------------------------------------------------
+// ─── Install prompt ───────────────────────────────────────────────────────────
 
 let deferredInstallPrompt = null;
 
@@ -350,7 +508,7 @@ function handleInstall() {
   });
 }
 
-// --- Network & Storage Status -----------------------------------------------
+// ─── Network badge ────────────────────────────────────────────────────────────
 
 function updateNetStatus() {
   const badge = document.getElementById('netBadge');
@@ -365,19 +523,24 @@ function updateNetStatus() {
   }
 }
 
-// --- Init --------------------------------------------------------------------
+// ─── Severity guide glow (shared so submit can call it) ───────────────────────
 
-window.addEventListener('online', () => {
-  updateNetStatus();
-  trySync(document.getElementById('status'));
-});
+const guideTiers = {};
 
+function updateGuideGlow(val) {
+  Object.entries(guideTiers).forEach(([key, el]) => {
+    if (el) el.classList.toggle('active', key === val);
+  });
+}
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+
+window.addEventListener('online', () => { updateNetStatus(); trySync(document.getElementById('status')); });
 window.addEventListener('offline', () => {
   updateNetStatus();
   const statusEl = document.getElementById('status');
-  if (statusEl && !statusEl.textContent.trim()) {
+  if (statusEl && !statusEl.textContent.trim())
     statusEl.textContent = 'Offline mode active — observations will save safely to local storage.';
-  }
 });
 
 navigator.serviceWorker?.addEventListener('message', (event) => {
@@ -386,11 +549,23 @@ navigator.serviceWorker?.addEventListener('message', (event) => {
 
 window.addEventListener('DOMContentLoaded', () => {
   updateNetStatus();
+  updateAIBadge('loading');
   startCamera();
   renderReportList();
   document.getElementById('reportForm').addEventListener('submit', handleSubmit);
   document.getElementById('installBtn')?.addEventListener('click', handleInstall);
   trySync(document.getElementById('status'));
+
+  // Severity guide glow
+  const severityEl = document.getElementById('severity');
+  guideTiers.low    = document.querySelector('.guide-tier.tier-low');
+  guideTiers.medium = document.querySelector('.guide-tier.tier-medium');
+  guideTiers.high   = document.querySelector('.guide-tier.tier-high');
+  severityEl.addEventListener('change', (e) => updateGuideGlow(e.target.value));
+  updateGuideGlow(severityEl.value);
+
+  // Start LLM init in background — don't block the UI
+  initLLM();
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js').then((reg) => {
@@ -398,4 +573,3 @@ window.addEventListener('DOMContentLoaded', () => {
     });
   }
 });
-

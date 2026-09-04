@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SlopeWatch Relay</title>
+<link rel="manifest" href="./manifest.json">
+<meta name="theme-color" content="#0f1b12">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="apple-touch-icon" href="./icon-192.png">
+<style>
+  :root {
+    --bg: #0b140e; --card: #132217; --card-subtle: #0f1a12;
+    --border: #223a27; --text: #f4f7f2; --muted: #a6bca3; --muted-dim: #718870;
+    --accent: #d97724; --accent-hover: #bf661a;
+    --high: #f87171; --medium: #fbbf24; --low: #4ade80;
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: var(--font-sans); font-size: 17px; line-height: 1.5;
+    padding-bottom: 4rem; -webkit-font-smoothing: antialiased;
+  }
+  header {
+    background: var(--card); border-bottom: 1px solid var(--border);
+    padding: 0.9rem 1.25rem;
+  }
+  .header-inner { max-width: 500px; margin: 0 auto; }
+  .brand-row { display: flex; justify-content: space-between; align-items: center; }
+  .brand-title {
+    margin: 0; font-size: 1.1rem; font-weight: 800; letter-spacing: -0.02em;
+    display: flex; align-items: center; gap: 0.5rem;
+  }
+  .back-link {
+    font-family: var(--font-mono); font-size: 0.75rem; color: var(--muted);
+    text-decoration: none; padding: 0.25rem 0.6rem; border: 1px solid var(--border);
+    border-radius: 6px;
+  }
+  .header-desc { margin: 0.3rem 0 0; font-size: 0.86rem; color: var(--muted); }
+  main { max-width: 500px; margin: 0 auto; padding: 1.1rem; }
+
+  /* Mode toggle */
+  .mode-tabs {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;
+    margin-bottom: 1.5rem;
+  }
+  .mode-tab {
+    padding: 0.75rem; border-radius: 10px; border: 1.5px solid var(--border);
+    background: var(--card-subtle); color: var(--muted); font-size: 0.9rem;
+    font-weight: 700; cursor: pointer; text-align: center; transition: all 0.15s;
+  }
+  .mode-tab.active {
+    border-color: var(--accent); background: rgba(217, 119, 36, 0.1);
+    color: var(--accent);
+  }
+
+  /* Panel */
+  .panel { display: none; flex-direction: column; gap: 1rem; }
+  .panel.visible { display: flex; }
+
+  /* Info box */
+  .info-box {
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    padding: 0.85rem 1rem; font-size: 0.88rem; color: var(--muted); line-height: 1.5;
+  }
+  .info-box strong { color: var(--text); }
+
+  label { display: block; font-size: 0.95rem; font-weight: 700; margin-bottom: 0.3rem; }
+  textarea, input[type=text] {
+    width: 100%; padding: 0.85rem 1rem; border-radius: 10px;
+    border: 1.5px solid var(--border); background: var(--card); color: var(--text);
+    font-family: var(--font-sans); font-size: 1rem; resize: vertical;
+  }
+  textarea:focus, input:focus {
+    border-color: #44744d; outline: none; background: var(--card-subtle);
+  }
+  .sdp-area { min-height: 7rem; font-family: var(--font-mono); font-size: 0.72rem; }
+
+  button.primary {
+    width: 100%; padding: 1rem; border: none; border-radius: 10px;
+    background: var(--accent); color: #fff; font-size: 1.05rem; font-weight: 700;
+    cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+  }
+  button.primary:hover { background: var(--accent-hover); }
+  button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
+  button.secondary {
+    width: 100%; padding: 0.75rem; border: 1.5px solid var(--border);
+    border-radius: 10px; background: transparent; color: var(--muted);
+    font-size: 0.95rem; font-weight: 600; cursor: pointer;
+  }
+  button.secondary:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* QR display */
+  #qrWrap {
+    display: none; flex-direction: column; align-items: center; gap: 0.75rem;
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 1.25rem;
+  }
+  #qrWrap.visible { display: flex; }
+  #qrCanvas { border-radius: 8px; background: #fff; padding: 8px; }
+  #qrInstruction {
+    font-size: 0.85rem; color: var(--muted); text-align: center; line-height: 1.4;
+  }
+
+  /* Alert display on receiver */
+  #alertBox {
+    display: none; background: #1c0a0a; border: 2px solid var(--high);
+    border-radius: 12px; padding: 1.1rem;
+  }
+  #alertBox.visible { display: block; }
+  #alertBox h3 { margin: 0 0 0.5rem; color: var(--high); font-size: 1rem; }
+  #alertBox p { margin: 0; font-size: 1rem; line-height: 1.5; color: var(--text); }
+
+  /* Status log */
+  #log {
+    font-family: var(--font-mono); font-size: 0.78rem; color: var(--muted);
+    background: var(--card-subtle); border: 1px solid var(--border);
+    border-radius: 8px; padding: 0.65rem 0.85rem; min-height: 2.5rem; line-height: 1.6;
+    white-space: pre-wrap; word-break: break-all;
+  }
+
+  /* Connection status dot */
+  .conn-status {
+    display: flex; align-items: center; gap: 0.5rem;
+    font-family: var(--font-mono); font-size: 0.75rem; color: var(--muted);
+  }
+  .conn-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .conn-dot.connected { background: var(--low); box-shadow: 0 0 6px rgba(74,222,128,0.6); }
+  .conn-dot.connecting { background: var(--medium); animation: pulse 1s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-inner">
+    <div class="brand-row">
+      <h1 class="brand-title">📡 SlopeWatch Relay</h1>
+      <a href="./index.html" class="back-link">← BACK</a>
+    </div>
+    <p class="header-desc">Broadcast official hazard alerts phone-to-phone with no internet</p>
+  </div>
+</header>
+
+<main>
+  <div class="mode-tabs">
+    <div class="mode-tab active" id="tabSend" role="button" tabindex="0">📤 SEND ALERT</div>
+    <div class="mode-tab" id="tabReceive" role="button" tabindex="0">📥 RECEIVE ALERT</div>
+  </div>
+
+  <!-- ── SEND PANEL ─────────────────────────────────────────────── -->
+  <div class="panel visible" id="sendPanel">
+    <div class="info-box">
+      <strong>How it works:</strong> Type the official alert, tap Generate QR.
+      Other phones open Relay → Receive, tap Scan QR, and get the alert instantly —
+      <strong>no internet needed</strong> on either device after this QR is shown.
+    </div>
+
+    <div>
+      <label for="alertText">Official alert message</label>
+      <textarea id="alertText" rows="4"
+        placeholder="e.g. GSI Orange Alert — Darjeeling hills. High landslide risk near Ghum, Kurseong, and Mirik. Avoid slopes and low-lying roads. Issued 04 Oct 2025 22:00 IST."></textarea>
+    </div>
+
+    <button class="primary" id="btnGenerateOffer">📡 Generate QR code to share</button>
+
+    <div id="qrWrap">
+      <canvas id="qrCanvas" width="240" height="240"></canvas>
+      <p id="qrInstruction">
+        Show this QR to other phones.<br>
+        They open <strong>SlopeWatch → Relay → Receive</strong> and tap <em>Scan QR</em>.
+      </p>
+      <div class="conn-status">
+        <span class="conn-dot" id="connDot"></span>
+        <span id="connText">Waiting for receiver…</span>
+      </div>
+    </div>
+
+    <div id="log"></div>
+  </div>
+
+  <!-- ── RECEIVE PANEL ──────────────────────────────────────────── -->
+  <div class="panel" id="receivePanel">
+    <div class="info-box">
+      <strong>How it works:</strong> The sender shows a QR code on their screen.
+      Tap <em>Scan QR</em> to open your camera, point at the QR, and the alert
+      arrives on your phone — no internet required.
+    </div>
+
+    <button class="primary" id="btnScanQR">📷 Scan QR from sender's screen</button>
+
+    <div id="scanWrap" style="display:none">
+      <video id="scanCamera" autoplay playsinline muted
+        style="width:100%;border-radius:12px;background:#000;max-height:260px;object-fit:cover"></video>
+      <p style="font-size:0.85rem;color:var(--muted);margin:0.5rem 0 0;text-align:center">
+        Point camera at the QR code on the sender's screen
+      </p>
+    </div>
+
+    <div id="alertBox">
+      <h3>⚠️ HAZARD ALERT RECEIVED</h3>
+      <p id="alertContent"></p>
+    </div>
+
+    <div id="log2"></div>
+  </div>
+</main>
+
+<!-- QR encoder: qrcodejs (MIT) via cdnjs -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<!-- jsQR for QR decoding from camera -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsqr/1.4.0/jsQR.min.js"></script>
+
+<script>
+'use strict';
+
+// ─── Tab switching ────────────────────────────────────────────────────────────
+const tabSend    = document.getElementById('tabSend');
+const tabReceive = document.getElementById('tabReceive');
+const sendPanel    = document.getElementById('sendPanel');
+const receivePanel = document.getElementById('receivePanel');
+
+function switchTab(tab) {
+  tabSend.classList.toggle('active', tab === 'send');
+  tabReceive.classList.toggle('active', tab === 'receive');
+  sendPanel.classList.toggle('visible', tab === 'send');
+  receivePanel.classList.toggle('visible', tab === 'receive');
+}
+tabSend.addEventListener('click', () => switchTab('send'));
+tabReceive.addEventListener('click', () => switchTab('receive'));
+tabSend.addEventListener('keydown', (e) => e.key === 'Enter' && switchTab('send'));
+tabReceive.addEventListener('keydown', (e) => e.key === 'Enter' && switchTab('receive'));
+
+// ─── Logging ──────────────────────────────────────────────────────────────────
+function log(msg, el) {
+  const el2 = el || document.getElementById('log');
+  el2.textContent = new Date().toLocaleTimeString() + ' — ' + msg;
+}
+
+// ─── QR rendering (via qrcodejs) ──────────────────────────────────────────────
+function renderQR(text) {
+  const canvas = document.getElementById('qrCanvas');
+  // qrcodejs draws into a div; we'll use a temp div then copy to canvas
+  const tmp = document.createElement('div');
+  document.body.appendChild(tmp);
+  new QRCode(tmp, {
+    text, width: 224, height: 224,
+    colorDark: '#000000', colorLight: '#ffffff',
+    correctLevel: QRCode.CorrectLevel.M
+  });
+  // Copy the generated img or canvas into our canvas
+  setTimeout(() => {
+    const src = tmp.querySelector('canvas') || tmp.querySelector('img');
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, 240, 240);
+    if (src) {
+      const img = src.tagName === 'IMG' ? src : null;
+      if (img) {
+        const i = new Image();
+        i.onload = () => { ctx.drawImage(i, 8, 8, 224, 224); };
+        i.src = img.src;
+      } else {
+        ctx.drawImage(src, 8, 8, 224, 224);
+      }
+    }
+    document.body.removeChild(tmp);
+  }, 100);
+}
+
+// ─── WebRTC helpers ───────────────────────────────────────────────────────────
+// We use QR codes as the signalling channel:
+//   Sender  → creates offer, encodes SDP as QR, shows it
+//   Receiver → scans QR, gets offer SDP, creates answer SDP,
+//               encodes answer as QR, shows it
+//   Sender  → scans answer QR, sets remote description → connection established
+//   Sender  → sends alert text over the data channel
+//
+// No STUN/TURN needed on a local hotspot (LAN); we add a Google STUN as
+// a best-effort helper for slightly longer-range connections.
+
+const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
+
+let pc = null;       // RTCPeerConnection
+let dc = null;       // RTCDataChannel (sender side)
+let scanStream = null;
+let scanRaf = null;
+
+function closePeer() {
+  if (dc) { try { dc.close(); } catch {} dc = null; }
+  if (pc) { try { pc.close(); } catch {} pc = null; }
+}
+
+function setConn(state) {
+  const dot  = document.getElementById('connDot');
+  const text = document.getElementById('connText');
+  if (!dot || !text) return;
+  dot.className = 'conn-dot' + (state === 'connected' ? ' connected' : state === 'connecting' ? ' connecting' : '');
+  text.textContent = state === 'connected' ? 'Receiver connected!' :
+                     state === 'connecting' ? 'Waiting for receiver…' : 'Disconnected';
+}
+
+// Compress SDP for QR (strip non-essential lines to fit in QR code)
+function compressSDP(sdp) {
+  return btoa(sdp.split('\n').join('|'));
+}
+function decompressSDP(b64) {
+  return atob(b64).split('|').join('\n');
+}
+
+// ─── SEND: Generate offer ──────────────────────────────────────────────────────
+document.getElementById('btnGenerateOffer').addEventListener('click', async () => {
+  const alertText = document.getElementById('alertText').value.trim();
+  if (!alertText) { log('Enter an alert message first.'); return; }
+
+  closePeer();
+  const btn = document.getElementById('btnGenerateOffer');
+  btn.disabled = true;
+  btn.textContent = '⏳ Creating connection…';
+  log('Creating WebRTC offer…');
+
+  pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+  dc = pc.createDataChannel('alert');
+
+  dc.onopen = () => {
+    setConn('connected');
+    log('Data channel open — sending alert…');
+    dc.send(JSON.stringify({ type: 'alert', text: alertText }));
+    log('Alert sent! Receiver should see it now.');
+  };
+  dc.onerror = (e) => log('Data channel error: ' + e.message);
+
+  pc.oniceconnectionstatechange = () => {
+    if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
+      setConn('disconnected');
+    }
+  };
+
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+
+  // Wait for ICE gathering to complete before encoding QR
+  await new Promise((resolve) => {
+    if (pc.iceGatheringState === 'complete') { resolve(); return; }
+    pc.onicegatheringstatechange = () => {
+      if (pc.iceGatheringState === 'complete') resolve();
+    };
+    // Timeout after 4s regardless (local network = fast ICE)
+    setTimeout(resolve, 4000);
+  });
+
+  const payload = JSON.stringify({
+    v: 1,
+    role: 'offer',
+    sdp: compressSDP(pc.localDescription.sdp),
+    type: pc.localDescription.type,
+  });
+
+  renderQR(payload);
+  document.getElementById('qrWrap').classList.add('visible');
+  setConn('connecting');
+  log('QR ready — show it to the receiver.');
+
+  btn.disabled = false;
+  btn.textContent = '🔄 Regenerate QR';
+
+  // After showing the offer QR, the sender also needs to accept an answer QR.
+  // We show a second "Scan Answer QR" flow below the QR.
+  showAnswerScanUI(alertText);
+});
+
+function showAnswerScanUI(alertText) {
+  // Remove any existing scan-answer UI
+  const old = document.getElementById('answerScanSection');
+  if (old) old.remove();
+
+  const sec = document.createElement('div');
+  sec.id = 'answerScanSection';
+  sec.style.cssText = 'display:flex;flex-direction:column;gap:0.75rem;margin-top:0.5rem';
+
+  const hint = document.createElement('p');
+  hint.style.cssText = 'font-size:0.85rem;color:var(--muted);margin:0;text-align:center';
+  hint.textContent = 'Once the receiver shows their QR, scan it here to complete the connection.';
+  sec.appendChild(hint);
+
+  const scanBtn = document.createElement('button');
+  scanBtn.className = 'secondary';
+  scanBtn.textContent = '📷 Scan receiver\'s answer QR';
+  scanBtn.addEventListener('click', () => startAnswerScan(sec));
+  sec.appendChild(scanBtn);
+
+  const videoEl = document.createElement('video');
+  videoEl.id = 'answerCamera';
+  videoEl.autoplay = true; videoEl.playsInline = true; videoEl.muted = true;
+  videoEl.style.cssText = 'width:100%;border-radius:12px;background:#000;display:none;max-height:220px;object-fit:cover';
+  sec.appendChild(videoEl);
+
+  document.getElementById('qrWrap').after(sec);
+}
+
+async function startAnswerScan(container) {
+  const videoEl = document.getElementById('answerCamera');
+  videoEl.style.display = 'block';
+  const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+  videoEl.srcObject = s;
+  const cvs = document.createElement('canvas');
+  const ctx = cvs.getContext('2d');
+
+  function scan() {
+    if (videoEl.readyState >= 2) {
+      cvs.width = videoEl.videoWidth;
+      cvs.height = videoEl.videoHeight;
+      ctx.drawImage(videoEl, 0, 0);
+      const img = ctx.getImageData(0, 0, cvs.width, cvs.height);
+      const code = jsQR(img.data, img.width, img.height);
+      if (code) {
+        s.getTracks().forEach(t => t.stop());
+        videoEl.style.display = 'none';
+        handleAnswerQR(code.data);
+        return;
+      }
+    }
+    requestAnimationFrame(scan);
+  }
+  requestAnimationFrame(scan);
+}
+
+async function handleAnswerQR(data) {
+  try {
+    const payload = JSON.parse(data);
+    if (payload.role !== 'answer') { log('QR is not an answer — try again.'); return; }
+    const sdp = decompressSDP(payload.sdp);
+    await pc.setRemoteDescription({ type: payload.type, sdp });
+    log('Answer accepted — connection established!');
+    setConn('connected');
+  } catch (err) {
+    log('Failed to read answer QR: ' + err.message);
+  }
+}
+
+// ─── RECEIVE: Scan offer QR ────────────────────────────────────────────────────
+document.getElementById('btnScanQR').addEventListener('click', async () => {
+  const wrap = document.getElementById('scanWrap');
+  wrap.style.display = 'block';
+  if (scanStream) scanStream.getTracks().forEach(t => t.stop());
+  try {
+    scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    const video = document.getElementById('scanCamera');
+    video.srcObject = scanStream;
+    startQRScan(video);
+  } catch (err) {
+    log('Camera error: ' + err.message, document.getElementById('log2'));
+  }
+});
+
+function startQRScan(video) {
+  const cvs = document.createElement('canvas');
+  const ctx = cvs.getContext('2d');
+  function scan() {
+    if (video.readyState >= 2) {
+      cvs.width = video.videoWidth;
+      cvs.height = video.videoHeight;
+      ctx.drawImage(video, 0, 0);
+      const img = ctx.getImageData(0, 0, cvs.width, cvs.height);
+      const code = jsQR(img.data, img.width, img.height);
+      if (code) {
+        scanStream.getTracks().forEach(t => t.stop());
+        document.getElementById('scanWrap').style.display = 'none';
+        handleOfferQR(code.data);
+        return;
+      }
+    }
+    scanRaf = requestAnimationFrame(scan);
+  }
+  scanRaf = requestAnimationFrame(scan);
+}
+
+async function handleOfferQR(data) {
+  const logEl = document.getElementById('log2');
+  try {
+    const payload = JSON.parse(data);
+    if (payload.role !== 'offer') { log('QR is not an offer — ask sender to regenerate.', logEl); return; }
+
+    closePeer();
+    log('Offer received — creating connection…', logEl);
+
+    pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+
+    pc.ondatachannel = (e) => {
+      const ch = e.channel;
+      ch.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === 'alert') showAlert(msg.text);
+        } catch {}
+      };
+      ch.onopen = () => log('Connected to sender!', logEl);
+    };
+
+    const offerSdp = decompressSDP(payload.sdp);
+    await pc.setRemoteDescription({ type: payload.type, sdp: offerSdp });
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+
+    await new Promise((resolve) => {
+      if (pc.iceGatheringState === 'complete') { resolve(); return; }
+      pc.onicegatheringstatechange = () => { if (pc.iceGatheringState === 'complete') resolve(); };
+      setTimeout(resolve, 4000);
+    });
+
+    const answerPayload = JSON.stringify({
+      v: 1, role: 'answer',
+      sdp: compressSDP(pc.localDescription.sdp),
+      type: pc.localDescription.type,
+    });
+
+    // Show answer QR for sender to scan
+    showAnswerQR(answerPayload, logEl);
+    log('Show this QR to the sender so they can complete the connection.', logEl);
+
+  } catch (err) {
+    log('Error: ' + err.message, logEl);
+  }
+}
+
+function showAnswerQR(payload, logEl) {
+  const existing = document.getElementById('answerQRWrap');
+  if (existing) existing.remove();
+
+  const wrap = document.createElement('div');
+  wrap.id = 'answerQRWrap';
+  wrap.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:0.75rem;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:1.25rem';
+
+  const lbl = document.createElement('p');
+  lbl.style.cssText = 'margin:0;font-size:0.85rem;color:var(--muted);text-align:center';
+  lbl.textContent = 'Show this QR to the sender to complete the connection:';
+  wrap.appendChild(lbl);
+
+  const cvs = document.createElement('canvas');
+  cvs.width = 240; cvs.height = 240;
+  cvs.style.cssText = 'border-radius:8px;background:#fff;padding:8px';
+  wrap.appendChild(cvs);
+
+  logEl.before(wrap);
+
+  // Draw QR into the canvas
+  const tmp = document.createElement('div');
+  document.body.appendChild(tmp);
+  new QRCode(tmp, {
+    text: payload, width: 224, height: 224,
+    colorDark: '#000000', colorLight: '#ffffff',
+    correctLevel: QRCode.CorrectLevel.M
+  });
+  setTimeout(() => {
+    const src = tmp.querySelector('canvas') || tmp.querySelector('img');
+    const ctx = cvs.getContext('2d');
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, 240, 240);
+    if (src) {
+      if (src.tagName === 'IMG') {
+        const i = new Image(); i.onload = () => ctx.drawImage(i, 8, 8, 224, 224); i.src = src.src;
+      } else { ctx.drawImage(src, 8, 8, 224, 224); }
+    }
+    document.body.removeChild(tmp);
+  }, 100);
+}
+
+function showAlert(text) {
+  const box = document.getElementById('alertBox');
+  document.getElementById('alertContent').textContent = text;
+  box.classList.add('visible');
+  // Speak the alert using Web Speech API if available
+  if ('speechSynthesis' in window) {
+    const utt = new SpeechSynthesisUtterance('Hazard alert: ' + text);
+    utt.lang = 'en-IN';
+    utt.rate = 0.9;
+    speechSynthesis.speak(utt);
+  }
+  log('Alert received and displayed.', document.getElementById('log2'));
+}
+</script>
+</body>
+</html>
