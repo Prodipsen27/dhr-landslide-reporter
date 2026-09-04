@@ -360,16 +360,86 @@
     color: var(--muted);
   }
   .ai-badge.ai-nano   { border-color: #1d4ed8; background: #0f1d40; color: #93c5fd; }
-  .ai-badge.ai-gpu    { border-color: #7c3aed; background: #1e0f40; color: #c4b5fd; }
+  .ai-badge.ai-qwen   { border-color: #7c3aed; background: #1e0f40; color: #c4b5fd; }
   .ai-badge.ai-wasm   { border-color: #0d7e6e; background: #0a2824; color: #6ee7b7; }
   .ai-badge.ai-template { border-color: var(--border); color: var(--muted); }
-  .ai-badge.ai-loading  { border-color: var(--border); color: var(--muted); }
+  .ai-badge.ai-loading  { border-color: #d97724; background: #28170a; color: #fbbf24; }
 
-  .guide-tier.active.tier-high {
-    background: var(--high-bg);
-    border-color: var(--high);
-    box-shadow: 0 0 8px rgba(248, 113, 113, 0.45), inset 0 0 6px rgba(248, 113, 113, 0.1);
-    color: var(--high);
+  /* On-demand AI button and progress bar */
+  .btn-improve-ai {
+    font-family: var(--font-sans);
+    width: auto;
+    min-height: 36px;
+    padding: 0.35rem 0.8rem;
+    border: 1.5px solid rgba(217, 119, 36, 0.45);
+    border-radius: 8px;
+    background: rgba(217, 119, 36, 0.09);
+    color: #f69d50;
+    font-size: 0.82rem;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    box-shadow: none;
+    align-self: flex-start;
+    transition: all 0.15s ease;
+  }
+  .btn-improve-ai:hover {
+    background: rgba(217, 119, 36, 0.2);
+    border-color: var(--accent);
+    color: #fff;
+  }
+  .btn-improve-ai:active {
+    transform: translateY(1px) scale(0.98);
+  }
+  .btn-improve-ai:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .ai-progress-wrap {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    padding: 0.6rem 0.85rem;
+    background: var(--card-subtle);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-family: var(--font-mono);
+    font-size: 0.74rem;
+    color: var(--muted);
+  }
+  .ai-progress-bar-bg {
+    width: 100%;
+    height: 6px;
+    background: #182b1d;
+    border-radius: 9999px;
+    overflow: hidden;
+  }
+  .ai-progress-bar-fill {
+    height: 100%;
+    width: 0%;
+    background: var(--accent);
+    border-radius: 9999px;
+    transition: width 0.2s ease;
+  }
+
+  .ai-enhanced-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #93c5fd;
+    background: #0f1d40;
+    border: 1px solid #1d4ed8;
+    padding: 0.2rem 0.55rem;
+    border-radius: 9999px;
+    align-self: flex-start;
   }
 
   /* Tactile Action Buttons */
@@ -641,7 +711,7 @@
         🏔️ Slope<span class="title-accent">Watch</span>
       </h1>
       <div style="display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;justify-content:flex-end">
-        <span id="aiBadge" class="ai-badge ai-loading">⏳ AI LOADING</span>
+        <span id="aiBadge" class="ai-badge ai-template">📋 TEMPLATE MODE</span>
         <span id="netBadge" class="status-pill offline">
           <span class="status-dot"></span>
           <span id="netText">OFFLINE STORAGE</span>

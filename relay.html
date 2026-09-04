@@ -153,9 +153,8 @@
   <!-- ── SEND PANEL ─────────────────────────────────────────────── -->
   <div class="panel visible" id="sendPanel">
     <div class="info-box">
-      <strong>How it works:</strong> Type the official alert, tap Generate QR.
-      Other phones open Relay → Receive, tap Scan QR, and get the alert instantly —
-      <strong>no internet needed</strong> on either device after this QR is shown.
+      <strong>Zero-Internet P2P Relay (Host-Only ICE):</strong> Turn on a portable Wi-Fi hotspot on either phone and connect the other phone (no mobile data required).
+      Tap <em>Generate QR code to share</em>. The phones establish a direct local WebRTC channel with no external STUN servers.
     </div>
 
     <div>
@@ -270,18 +269,21 @@ function renderQR(text) {
   }, 100);
 }
 
-// ─── WebRTC helpers ───────────────────────────────────────────────────────────
-// We use QR codes as the signalling channel:
-//   Sender  → creates offer, encodes SDP as QR, shows it
-//   Receiver → scans QR, gets offer SDP, creates answer SDP,
-//               encodes answer as QR, shows it
-//   Sender  → scans answer QR, sets remote description → connection established
-//   Sender  → sends alert text over the data channel
+// ─── WebRTC helpers (Fully Offline Host-Only ICE) ─────────────────────────────
+// We use QR codes as the air-gapped signalling channel:
+//   Sender  → creates offer with local host ICE candidates, encodes SDP as QR
+//   Receiver → scans offer QR, creates answer SDP as QR
+//   Sender  → scans answer QR → peer data channel opens directly over local subnet
 //
-// No STUN/TURN needed on a local hotspot (LAN); we add a Google STUN as
-// a best-effort helper for slightly longer-range connections.
+// Offline Hotspot Note: STUN servers (like stun.l.google.com) FAIL when the hotspot
+// has no upstream cellular internet, causing ICE gathering to time out with no candidates.
+// We configure iceServers: [] and iceTransportPolicy: 'all' so WebRTC gathers local
+// host-type candidates (e.g. 192.168.43.x) immediately in <100ms.
 
-const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
+const RTC_CONFIG = {
+  iceServers: [],
+  iceTransportPolicy: 'all'
+};
 
 let pc = null;       // RTCPeerConnection
 let dc = null;       // RTCDataChannel (sender side)
@@ -319,9 +321,9 @@ document.getElementById('btnGenerateOffer').addEventListener('click', async () =
   const btn = document.getElementById('btnGenerateOffer');
   btn.disabled = true;
   btn.textContent = '⏳ Creating connection…';
-  log('Creating WebRTC offer…');
+  log('Creating offline WebRTC offer (host-only ICE)…');
 
-  pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+  pc = new RTCPeerConnection(RTC_CONFIG);
   dc = pc.createDataChannel('alert');
 
   dc.onopen = () => {
@@ -341,14 +343,16 @@ document.getElementById('btnGenerateOffer').addEventListener('click', async () =
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
 
-  // Wait for ICE gathering to complete before encoding QR
+  // Fast host-only ICE gathering — resolves when complete or after 1.2s max (no STUN to hang on)
   await new Promise((resolve) => {
     if (pc.iceGatheringState === 'complete') { resolve(); return; }
+    const timer = setTimeout(resolve, 1200);
     pc.onicegatheringstatechange = () => {
-      if (pc.iceGatheringState === 'complete') resolve();
+      if (pc.iceGatheringState === 'complete') {
+        clearTimeout(timer);
+        resolve();
+      }
     };
-    // Timeout after 4s regardless (local network = fast ICE)
-    setTimeout(resolve, 4000);
   });
 
   const payload = JSON.stringify({
@@ -486,7 +490,7 @@ async function handleOfferQR(data) {
     closePeer();
     log('Offer received — creating connection…', logEl);
 
-    pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+    pc = new RTCPeerConnection(RTC_CONFIG);
 
     pc.ondatachannel = (e) => {
       const ch = e.channel;
@@ -496,7 +500,7 @@ async function handleOfferQR(data) {
           if (msg.type === 'alert') showAlert(msg.text);
         } catch {}
       };
-      ch.onopen = () => log('Connected to sender!', logEl);
+      ch.onopen = () => log('Connected to sender over local peer channel!', logEl);
     };
 
     const offerSdp = decompressSDP(payload.sdp);
@@ -504,10 +508,16 @@ async function handleOfferQR(data) {
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
 
+    // Fast host-only ICE gathering for receiver
     await new Promise((resolve) => {
       if (pc.iceGatheringState === 'complete') { resolve(); return; }
-      pc.onicegatheringstatechange = () => { if (pc.iceGatheringState === 'complete') resolve(); };
-      setTimeout(resolve, 4000);
+      const timer = setTimeout(resolve, 1200);
+      pc.onicegatheringstatechange = () => {
+        if (pc.iceGatheringState === 'complete') {
+          clearTimeout(timer);
+          resolve();
+        }
+      };
     });
 
     const answerPayload = JSON.stringify({

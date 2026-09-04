@@ -65,6 +65,25 @@ async function markSynced(id) {
   });
 }
 
+async function updateReportExplanation(id, explanation, explanationSource) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    const store = tx.objectStore(STORE);
+    const getReq = store.get(id);
+    getReq.onsuccess = () => {
+      const rec = getReq.result;
+      if (rec) {
+        rec.explanation = explanation;
+        rec.explanationSource = explanationSource || 'ai';
+        store.put(rec);
+      }
+    };
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
 // ─── MediaPipe Image Classifier ───────────────────────────────────────────────
 // Maps general EfficientNet-Lite ImageNet labels to slope-hazard severity.
 // No custom training needed — we exploit the labels that correlate with the
@@ -176,17 +195,20 @@ const SEVERITY_TEMPLATES = {
   }
 };
 
-// ─── On-device LLM (auto-selected by device capability) ───────────────────────
+// ─── On-device LLM (Lazy-loaded On Demand) ───────────────────────────────────
 //
-// Priority:
-//   1. Chrome Prompt API (Gemini Nano) — 0 MB, best quality, flagship only
-//   2. Transformers.js via WebGPU     — ~270 MB, fast GPU path, mid-range+
-//   3. Transformers.js via WASM       — ~270 MB, universal, slower
-//   4. Curated templates              — 0 MB, instant, all devices
+// Strategy:
+//   1. Primary output: Curated disaster-grade templates (instant, 0 MB, verified).
+//   2. On-demand AI: Triggered ONLY when the user taps "✨ Improve with AI".
+//      - Fast Path: Chrome Gemini Nano (if 'readily' available, 0 MB, 1s)
+//      - Universal Path: Wllama + Qwen2.5-0.5B-Instruct (q2_k) via WebAssembly
+//      - Fallback: Transformers.js WASM (SmolLM2-135M)
+//   3. Status badge: 'TEMPLATE MODE' by default on page load. Zero data downloaded.
 
-let llmBackend = null;  // 'gemini-nano' | 'transformers-gpu' | 'transformers-wasm' | 'template'
-let llmSession = null;  // Gemini Nano session
-let tfPipeline = null;  // Transformers.js pipeline
+let llmBackend = 'template';
+let llmSession = null;
+let wllamaInstance = null;
+let tfPipeline = null;
 
 const SYSTEM_PROMPT =
   'You are a slope-safety advisor for the Darjeeling hills in West Bengal, India. ' +
@@ -194,93 +216,110 @@ const SYSTEM_PROMPT =
   'reading on a small phone screen. Always respond in the requested language only. ' +
   'Keep answers to exactly 2 short sentences.';
 
-async function tryGeminiNano() {
-  if (!('LanguageModel' in self)) return false;
+const WLLAMA_CONFIG = {
+  'single-thread/wllama.wasm': 'https://cdn.jsdelivr.net/npm/@wllama/wllama@2.3.2/esm/single-thread/wllama.wasm',
+  'multi-thread/wllama.wasm': 'https://cdn.jsdelivr.net/npm/@wllama/wllama@2.3.2/esm/multi-thread/wllama.wasm',
+};
+const QWEN_GGUF_URL = 'https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q2_k.gguf';
+
+// Check Gemini Nano availability passively on load (0 bytes, instant)
+async function checkGeminiNanoReady() {
+  if (!('LanguageModel' in self)) return;
   try {
     const avail = await LanguageModel.availability();
-    if (avail !== 'readily') return false;
-    llmSession = await LanguageModel.create({
-      systemPrompt: SYSTEM_PROMPT,
-      temperature: 0.3,
-      topK: 3,
-    });
-    llmBackend = 'gemini-nano';
-    return true;
-  } catch { return false; }
+    if (avail === 'readily') {
+      llmSession = await LanguageModel.create({
+        systemPrompt: SYSTEM_PROMPT,
+        temperature: 0.3,
+        topK: 3
+      });
+      llmBackend = 'gemini-nano';
+      updateAIBadge('gemini-nano');
+    }
+  } catch {}
 }
 
-async function tryTransformersJS(useGPU) {
+// On-demand AI generation (called ONLY when user taps "✨ Improve with AI")
+async function runOnDemandAI(severity, notes, lang, location, onProgress) {
+  const langLabel = { en: 'English', ne: 'Nepali', hi: 'Hindi', bn: 'Bengali' }[lang] || 'English';
+  let prompt =
+    `A hill-slope observation in the Darjeeling hills was logged with severity "${severity}". ` +
+    `Observer notes: "${notes || 'none'}". `;
+  if (location) {
+    prompt += `Location: approximately ${location.lat.toFixed(4)}°N, ${location.lng.toFixed(4)}°E. `;
+  }
+  prompt += `In ${langLabel}, write 2 short sentences: what this likely means, and what the person should do right now.`;
+
+  // 1. Chrome Gemini Nano Fast Path (if present)
+  if (llmBackend === 'gemini-nano' && llmSession) {
+    onProgress('Synthesizing with Gemini Nano…', 90);
+    const text = await llmSession.prompt(prompt);
+    return { text: text.trim(), model: 'Gemini Nano' };
+  }
+
+  // 2. Wllama + Qwen2.5-0.5B-q2 Path
+  updateAIBadge('loading');
   try {
-    const { pipeline, env } = await import(
-      'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.4.2/dist/transformers.min.js'
-    );
+    if (!wllamaInstance) {
+      onProgress('Initializing Wllama WASM runtime…', 10);
+      const { Wllama } = await import('https://cdn.jsdelivr.net/npm/@wllama/wllama@2.3.2/esm/index.js');
+      wllamaInstance = new Wllama(WLLAMA_CONFIG);
+      onProgress('Fetching Qwen2.5-0.5B-q2 model…', 20);
+      await wllamaInstance.loadModelFromUrl(QWEN_GGUF_URL, {
+        progressCallback: ({ loaded, total }) => {
+          if (total) {
+            const pct = Math.min(92, Math.max(20, Math.round((loaded / total) * 100)));
+            const mb = (loaded / (1024 * 1024)).toFixed(0);
+            const totMb = (total / (1024 * 1024)).toFixed(0);
+            onProgress(`Downloading Qwen2.5-0.5B (${mb}/${totMb} MB)…`, pct);
+          }
+        }
+      });
+    }
+    onProgress('Synthesizing on-device explanation…', 95);
+    const formatted = `<|im_start|>system\n${SYSTEM_PROMPT}<|im_end|>\n<|im_start|>user\n${prompt}<|im_end|>\n<|im_start|>assistant\n`;
+    const out = await wllamaInstance.createCompletion(formatted, {
+      nPredict: 90,
+      temperature: 0.3,
+      stopTokens: ['<|im_end|>', '<|endoftext|>']
+    });
+    llmBackend = 'wllama-qwen';
+    updateAIBadge('wllama-qwen');
+    return { text: out.trim(), model: 'Qwen2.5-0.5B (Wllama)' };
+  } catch (wErr) {
+    console.warn('Wllama failed, attempting Transformers.js WASM fallback:', wErr);
+  }
+
+  // 3. Transformers.js Fallback
+  try {
+    onProgress('Loading Transformers.js fallback…', 25);
+    const { pipeline, env } = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.4.2/dist/transformers.min.js');
     env.allowRemoteModels = true;
     env.useBrowserCache = true;
-    const device = useGPU ? 'webgpu' : 'wasm';
-    // SmolLM2-135M-Instruct: 270MB, fast, multilingual enough for short prompts
-    tfPipeline = await pipeline('text-generation', 'HuggingFaceTB/SmolLM2-135M-Instruct', {
-      device,
-      dtype: 'q4',
-    });
-    llmBackend = useGPU ? 'transformers-gpu' : 'transformers-wasm';
-    return true;
-  } catch { return false; }
-}
-
-async function initLLM() {
-  if (llmBackend) return;
-  updateAIBadge('loading');
-
-  if (await tryGeminiNano()) { updateAIBadge(); return; }
-
-  const hasWebGPU = 'gpu' in navigator;
-  if (hasWebGPU && await tryTransformersJS(true)) { updateAIBadge(); return; }
-  if (await tryTransformersJS(false)) { updateAIBadge(); return; }
-
-  llmBackend = 'template';
-  updateAIBadge();
-}
-
-async function runLLMPrompt(prompt) {
-  if (llmBackend === 'gemini-nano') {
-    return await llmSession.prompt(prompt);
-  }
-  if (llmBackend === 'transformers-gpu' || llmBackend === 'transformers-wasm') {
-    const messages = [
-      { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: prompt },
-    ];
-    const out = await tfPipeline(messages, { max_new_tokens: 120, temperature: 0.3 });
-    return out[0]?.generated_text?.at(-1)?.content ?? '';
-  }
-  return null;
-}
-
-async function explainWithLLM(severity, notes, lang, location) {
-  const fallback = SEVERITY_TEMPLATES[severity];
-  const langLabel = { en: 'English', ne: 'Nepali', hi: 'Hindi', bn: 'Bengali' }[lang] || 'English';
-  const fallbackText = fallback[lang] || fallback.en;
-
-  if (!llmBackend) await initLLM();
-
-  if (llmBackend === 'template') return fallbackText;
-
-  try {
-    let prompt =
-      `A hill-slope observation in the Darjeeling hills was logged with severity "${severity}". ` +
-      `Observer notes: "${notes || 'none'}". `;
-    if (location) {
-      prompt += `Location: approximately ${location.lat.toFixed(4)}°N, ${location.lng.toFixed(4)}°E. `;
+    if (!tfPipeline) {
+      tfPipeline = await pipeline('text-generation', 'HuggingFaceTB/SmolLM2-135M-Instruct', {
+        device: 'wasm',
+        dtype: 'q4',
+        progress_callback: (info) => {
+          if (info.status === 'progress' && info.total) {
+            const pct = Math.min(92, Math.round((info.loaded / info.total) * 100));
+            onProgress(`Downloading SmolLM2 (${pct}%)…`, pct);
+          }
+        }
+      });
     }
-    prompt += `In ${langLabel}, write 2 short sentences: what this likely means, and what the person should do right now.`;
-
-    const result = await runLLMPrompt(prompt);
-    return result || fallbackText;
-  } catch (err) {
-    console.warn('LLM prompt failed, using template:', err);
-    llmSession = null; tfPipeline = null; llmBackend = 'template';
-    updateAIBadge();
-    return fallbackText;
+    onProgress('Synthesizing advice…', 95);
+    const out = await tfPipeline([
+      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'user', content: prompt }
+    ], { max_new_tokens: 80, temperature: 0.3 });
+    const text = out[0]?.generated_text?.at(-1)?.content ?? '';
+    llmBackend = 'transformers-wasm';
+    updateAIBadge('transformers-wasm');
+    return { text: text.trim(), model: 'SmolLM2-135M' };
+  } catch (tfErr) {
+    console.warn('All on-device LLMs failed:', tfErr);
+    throw new Error('On-device model could not load (network or memory limit).');
   }
 }
 
@@ -289,15 +328,15 @@ async function explainWithLLM(severity, notes, lang, location) {
 function updateAIBadge(state) {
   const badge = document.getElementById('aiBadge');
   if (!badge) return;
-  const s = state || llmBackend || 'loading';
+  const s = state || llmBackend || 'template';
   const MAP = {
-    'loading':           { cls: 'ai-loading',  dot: '⏳', label: 'AI LOADING' },
-    'gemini-nano':       { cls: 'ai-nano',      dot: '✦',  label: 'GEMINI NANO' },
-    'transformers-gpu':  { cls: 'ai-gpu',       dot: '⚡', label: 'ON-DEVICE · GPU' },
-    'transformers-wasm': { cls: 'ai-wasm',      dot: '🔧', label: 'ON-DEVICE · WASM' },
-    'template':          { cls: 'ai-template',  dot: '📋', label: 'TEMPLATE MODE' },
+    'template':          { cls: 'ai-template', dot: '📋', label: 'TEMPLATE MODE' },
+    'gemini-nano':       { cls: 'ai-nano',     dot: '✦',  label: 'GEMINI NANO READY' },
+    'wllama-qwen':       { cls: 'ai-qwen',     dot: '⚡', label: 'QWEN-0.5B READY' },
+    'transformers-wasm': { cls: 'ai-wasm',     dot: '⚡', label: 'SMOLLM-135M READY' },
+    'loading':           { cls: 'ai-loading',  dot: '⏳', label: 'LOADING AI…' },
   };
-  const cfg = MAP[s] || MAP['loading'];
+  const cfg = MAP[s] || MAP['template'];
   badge.className = 'ai-badge ' + cfg.cls;
   badge.textContent = cfg.dot + ' ' + cfg.label;
 }
@@ -438,6 +477,21 @@ async function renderReportList() {
     explanation.textContent = r.explanation;
     li.appendChild(explanation);
 
+    if (r.explanationSource === 'ai') {
+      const aiTag = document.createElement('span');
+      aiTag.className = 'ai-enhanced-badge';
+      aiTag.textContent = '✦ AI-Enhanced';
+      li.appendChild(aiTag);
+    } else {
+      const improveBtn = document.createElement('button');
+      improveBtn.className = 'btn-improve-ai';
+      improveBtn.type = 'button';
+      improveBtn.textContent = '✨ Improve with AI';
+      improveBtn.title = 'Generate dynamic explanation with on-device model';
+      improveBtn.addEventListener('click', () => handleImproveWithAI(r, li, explanation, improveBtn));
+      li.appendChild(improveBtn);
+    }
+
     const meta = document.createElement('div');
     meta.className = 'report-meta';
     meta.textContent = '⏱ ' + formatTime(r.createdAt) +
@@ -445,6 +499,61 @@ async function renderReportList() {
     li.appendChild(meta);
 
     list.appendChild(li);
+  }
+}
+
+async function handleImproveWithAI(report, cardEl, textEl, buttonEl) {
+  buttonEl.style.display = 'none';
+
+  const progressWrap = document.createElement('div');
+  progressWrap.className = 'ai-progress-wrap';
+  progressWrap.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <span class="ai-progress-text">Preparing on-device AI…</span>
+      <span class="ai-progress-pct">0%</span>
+    </div>
+    <div class="ai-progress-bar-bg">
+      <div class="ai-progress-bar-fill" style="width:0%"></div>
+    </div>
+  `;
+  cardEl.appendChild(progressWrap);
+
+  const textLabel = progressWrap.querySelector('.ai-progress-text');
+  const pctLabel = progressWrap.querySelector('.ai-progress-pct');
+  const barFill = progressWrap.querySelector('.ai-progress-bar-fill');
+
+  function updateProgress(msg, pct) {
+    textLabel.textContent = msg;
+    pctLabel.textContent = pct + '%';
+    barFill.style.width = pct + '%';
+  }
+
+  try {
+    const result = await runOnDemandAI(
+      report.severity,
+      report.notes,
+      report.lang,
+      report.location,
+      updateProgress
+    );
+
+    await updateReportExplanation(report.id, result.text, 'ai');
+    textEl.textContent = result.text;
+    progressWrap.remove();
+
+    const tag = document.createElement('span');
+    tag.className = 'ai-enhanced-badge';
+    tag.textContent = `✦ AI-Enhanced (${result.model})`;
+    cardEl.appendChild(tag);
+  } catch (err) {
+    console.error('On-demand AI failed:', err);
+    textLabel.textContent = '⚠️ Offline / model unavailable — keeping safety template';
+    barFill.style.background = 'var(--medium)';
+    setTimeout(() => {
+      progressWrap.remove();
+      buttonEl.style.display = 'inline-flex';
+      updateAIBadge('template');
+    }, 3500);
   }
 }
 
@@ -460,7 +569,7 @@ async function handleSubmit(e) {
 
   btn.disabled = true;
   btn.textContent = '⏳ Saving…';
-  statusEl.textContent = 'Analysing photo and generating explanation offline…';
+  statusEl.textContent = 'Logging observation…';
 
   try {
     const photo = stream ? captureFrame() : null;
@@ -473,9 +582,20 @@ async function handleSubmit(e) {
     }
 
     const location = await getLocation();
-    const explanation = await explainWithLLM(suggestedSeverity, notes, lang, location);
 
-    await saveReport({ severity: suggestedSeverity, notes, lang, photo, location, explanation });
+    // Primary output: Verified instant disaster-grade template (0ms, 0MB)
+    const fallback = SEVERITY_TEMPLATES[suggestedSeverity];
+    const initialExplanation = fallback[lang] || fallback.en;
+
+    await saveReport({
+      severity: suggestedSeverity,
+      notes,
+      lang,
+      photo,
+      location,
+      explanation: initialExplanation,
+      explanationSource: 'template'
+    });
 
     document.getElementById('notes').value = '';
     statusEl.textContent = 'Saved locally. Will sync automatically when online.';
@@ -549,7 +669,8 @@ navigator.serviceWorker?.addEventListener('message', (event) => {
 
 window.addEventListener('DOMContentLoaded', () => {
   updateNetStatus();
-  updateAIBadge('loading');
+  updateAIBadge('template');
+  checkGeminiNanoReady();
   startCamera();
   renderReportList();
   document.getElementById('reportForm').addEventListener('submit', handleSubmit);
@@ -563,9 +684,6 @@ window.addEventListener('DOMContentLoaded', () => {
   guideTiers.high   = document.querySelector('.guide-tier.tier-high');
   severityEl.addEventListener('change', (e) => updateGuideGlow(e.target.value));
   updateGuideGlow(severityEl.value);
-
-  // Start LLM init in background — don't block the UI
-  initLLM();
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js').then((reg) => {
