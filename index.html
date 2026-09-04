@@ -442,6 +442,76 @@
     align-self: flex-start;
   }
 
+  /* Hazard indicator chips */
+  .hazard-chips-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    margin-top: 0.35rem;
+  }
+
+  .hazard-chip {
+    width: auto;
+    min-height: 40px;
+    padding: 0.4rem 0.75rem;
+    border-radius: 8px;
+    border: 1.5px solid var(--border);
+    background: var(--card-subtle);
+    color: var(--muted);
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    box-shadow: none;
+    transition: all 0.15s ease;
+  }
+
+  .hazard-chip:hover {
+    border-color: var(--border-hover);
+    color: var(--text);
+    background: var(--card);
+  }
+
+  .hazard-chip.active {
+    background: rgba(217, 119, 36, 0.18);
+    border-color: var(--accent);
+    color: #fbd38d;
+    box-shadow: 0 0 8px rgba(217, 119, 36, 0.25);
+  }
+
+  .hazard-chip.active .chip-icon {
+    transform: scale(1.15);
+  }
+
+  .hazard-chip .chip-icon {
+    font-size: 1rem;
+    line-height: 1;
+    transition: transform 0.15s ease;
+  }
+
+  .hazard-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #fbd38d;
+    background: rgba(217, 119, 36, 0.12);
+    border: 1px solid rgba(217, 119, 36, 0.35);
+    padding: 0.2rem 0.55rem;
+    border-radius: 6px;
+  }
+
+  .hazard-badges-wrap {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-top: 0.1rem;
+  }
+
   /* Tactile Action Buttons */
   button {
     font-family: var(--font-sans);
@@ -750,6 +820,33 @@
         <span class="guide-tier tier-medium">▲ MEDIUM ALERT</span>
         <span class="guide-tier tier-high">■ HIGH DANGER</span>
       </div>
+    </div>
+
+    <div class="form-group">
+      <label>Observed slope precursors <span class="field-hint" style="font-weight:normal">(tap to tag)</span></label>
+      <div class="hazard-chips-grid" id="hazardChips" role="group" aria-label="Observed slope signs">
+        <button type="button" class="hazard-chip" data-flag="tension_crack" data-severity="medium">
+          <span class="chip-icon">⚡</span>
+          <span class="chip-label">Tension crack</span>
+        </button>
+        <button type="button" class="hazard-chip" data-flag="tilted_tree" data-severity="medium">
+          <span class="chip-icon">🌲</span>
+          <span class="chip-label">Tilted tree / pole</span>
+        </button>
+        <button type="button" class="hazard-chip" data-flag="bulging_wall" data-severity="high">
+          <span class="chip-icon">🧱</span>
+          <span class="chip-label">Bulging wall</span>
+        </button>
+        <button type="button" class="hazard-chip" data-flag="active_seepage" data-severity="medium">
+          <span class="chip-icon">💧</span>
+          <span class="chip-label">Active seepage</span>
+        </button>
+        <button type="button" class="hazard-chip" data-flag="fresh_debris" data-severity="high">
+          <span class="chip-icon">🪨</span>
+          <span class="chip-label">Fresh rock / debris</span>
+        </button>
+      </div>
+      <span class="field-hint">Field signs help local officials distinguish deep rotational slide risk.</span>
     </div>
 
     <div class="form-group">

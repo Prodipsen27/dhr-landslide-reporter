@@ -195,6 +195,48 @@ const SEVERITY_TEMPLATES = {
   }
 };
 
+// ─── Geotechnical Hazard Precursors ───────────────────────────────────────────
+const HAZARD_LABELS = {
+  tension_crack:  { icon: '⚡', label: 'Tension crack' },
+  tilted_tree:    { icon: '🌲', label: 'Tilted tree / pole' },
+  bulging_wall:   { icon: '🧱', label: 'Bulging wall' },
+  active_seepage: { icon: '💧', label: 'Active seepage' },
+  fresh_debris:   { icon: '🪨', label: 'Fresh debris' }
+};
+
+const HAZARD_ADVICE = {
+  tension_crack: {
+    en: 'Tension cracks indicate active shear strain opening along the slope crest.',
+    ne: 'भिरालोको माथिल्लो भागमा परेको चिराले जमिन भत्किन थालेको संकेत गर्छ।',
+    hi: 'ढलान के शीर्ष पर दरारें जमीन के खिसकने का गंभीर संकेत हैं।',
+    bn: 'ঢালের শীর্ষে ফাটল সক্রিয় ভূমি স্খলনের স্পষ্ট লক্ষণ।'
+  },
+  tilted_tree: {
+    en: 'Tilted trees and utility poles indicate progressive deep soil creep.',
+    ne: 'ढल्किएका रुखहरूले भित्री माटो बिस्तारै खसिरहेको देखाउँछन्।',
+    hi: 'झुके हुए पेड़ और खंभे मिट्टी के गहरे खिसकाव को दर्शाते हैं।',
+    bn: 'হেলে পড়া গাছ ও খুঁটি মাটির গভীর ধীরগতির স্থানচ্যুতি প্রকাশ করে।'
+  },
+  bulging_wall: {
+    en: 'Bulging retaining structures risk sudden catastrophic collapse under water pressure.',
+    ne: 'फुलेको पर्खाल पानीको चापले एक्कासी भत्किने ठूलो जोखिम हुन्छ।',
+    hi: 'उभरी हुई सुरक्षा दीवार पानी के दबाव में अचानक ढह सकती है।',
+    bn: 'ফুলে ওঠা সুরক্ষা প্রাচীর অতিরিক্ত জলের চাপে আকস্মিক ধসে পড়ার ঝুঁকিতে রয়েছে।'
+  },
+  active_seepage: {
+    en: 'Active muddy seepage signals dangerously high groundwater pore pressure.',
+    ne: 'धमिलो पानीको चुहावटले जमिनभित्र पानीको खतरनाक चाप देखाउँछ।',
+    hi: 'मटमैले पानी का रिसाव जमीन के अंदर खतरनाक पानी का दबाव दर्शाता है।',
+    bn: 'ঘোলা জলের তীব্র নিঃসরণ মাটির গভীরে বিপজ্জনক জলের চাপ নির্দেশ করে।'
+  },
+  fresh_debris: {
+    en: 'Fresh rockfall and loose mud debris confirms ongoing mass detachment.',
+    ne: 'ताजा ढुङ्गा र माटो खस्नुले भिरालो भत्किने क्रम जारी रहेको प्रमाणित गर्छ।',
+    hi: 'ताज़ा मलबा और पत्थर गिरना लगातार भूस्खलन जारी होने की पुष्टि करता है।',
+    bn: 'তাজা পাথর ও কাদা ধসে পড়া চলমান ভূমিধ্বসের প্রমাণ।'
+  }
+};
+
 // ─── On-device LLM (Lazy-loaded On Demand) ───────────────────────────────────
 //
 // Strategy:
@@ -240,11 +282,15 @@ async function checkGeminiNanoReady() {
 }
 
 // On-demand AI generation (called ONLY when user taps "✨ Improve with AI")
-async function runOnDemandAI(severity, notes, lang, location, onProgress) {
+async function runOnDemandAI(severity, notes, lang, location, hazardFlags, onProgress) {
   const langLabel = { en: 'English', ne: 'Nepali', hi: 'Hindi', bn: 'Bengali' }[lang] || 'English';
   let prompt =
     `A hill-slope observation in the Darjeeling hills was logged with severity "${severity}". ` +
     `Observer notes: "${notes || 'none'}". `;
+  if (hazardFlags && hazardFlags.length > 0) {
+    const names = hazardFlags.map(f => HAZARD_LABELS[f]?.label || f).join(', ');
+    prompt += `Observed geotechnical signs: ${names}. `;
+  }
   if (location) {
     prompt += `Location: approximately ${location.lat.toFixed(4)}°N, ${location.lng.toFixed(4)}°E. `;
   }
@@ -473,6 +519,21 @@ async function renderReportList() {
       li.appendChild(thumb);
     }
 
+    if (r.hazardFlags && r.hazardFlags.length > 0) {
+      const flagsWrap = document.createElement('div');
+      flagsWrap.className = 'hazard-badges-wrap';
+      r.hazardFlags.forEach((flag) => {
+        const meta = HAZARD_LABELS[flag];
+        if (meta) {
+          const badge = document.createElement('span');
+          badge.className = 'hazard-badge';
+          badge.textContent = `${meta.icon} ${meta.label}`;
+          flagsWrap.appendChild(badge);
+        }
+      });
+      li.appendChild(flagsWrap);
+    }
+
     const explanation = document.createElement('p');
     explanation.textContent = r.explanation;
     li.appendChild(explanation);
@@ -534,6 +595,7 @@ async function handleImproveWithAI(report, cardEl, textEl, buttonEl) {
       report.notes,
       report.lang,
       report.location,
+      report.hazardFlags || [],
       updateProgress
     );
 
@@ -557,6 +619,35 @@ async function handleImproveWithAI(report, cardEl, textEl, buttonEl) {
   }
 }
 
+// ─── Hazard chips helper ──────────────────────────────────────────────────────
+
+function getSelectedHazards() {
+  return Array.from(document.querySelectorAll('.hazard-chip.active')).map((c) => c.dataset.flag);
+}
+
+function clearHazardChips() {
+  document.querySelectorAll('.hazard-chip.active').forEach((c) => c.classList.remove('active'));
+}
+
+function setupHazardChips() {
+  const chips = document.querySelectorAll('.hazard-chip');
+  const severityEl = document.getElementById('severity');
+  chips.forEach((chip) => {
+    chip.addEventListener('click', () => {
+      chip.classList.toggle('active');
+      const activeHigh = document.querySelectorAll('.hazard-chip.active[data-severity="high"]');
+      const activeMed = document.querySelectorAll('.hazard-chip.active[data-severity="medium"]');
+      if (activeHigh.length > 0) {
+        severityEl.value = 'high';
+        updateGuideGlow('high');
+      } else if (activeMed.length > 0 && severityEl.value === 'low') {
+        severityEl.value = 'medium';
+        updateGuideGlow('medium');
+      }
+    });
+  });
+}
+
 // ─── Submit ───────────────────────────────────────────────────────────────────
 
 async function handleSubmit(e) {
@@ -566,6 +657,7 @@ async function handleSubmit(e) {
   const severityEl = document.getElementById('severity');
   const notes = document.getElementById('notes').value;
   const lang = document.getElementById('lang').value;
+  const hazardFlags = getSelectedHazards();
 
   btn.disabled = true;
   btn.textContent = '⏳ Saving…';
@@ -585,10 +677,20 @@ async function handleSubmit(e) {
 
     // Primary output: Verified instant disaster-grade template (0ms, 0MB)
     const fallback = SEVERITY_TEMPLATES[suggestedSeverity];
-    const initialExplanation = fallback[lang] || fallback.en;
+    let initialExplanation = fallback[lang] || fallback.en;
+
+    // Enhance template with specific geotechnical precursor advice if flagged
+    if (hazardFlags.length > 0) {
+      const topHazard = hazardFlags[0];
+      const hazardSnip = HAZARD_ADVICE[topHazard]?.[lang] || HAZARD_ADVICE[topHazard]?.en;
+      if (hazardSnip) {
+        initialExplanation = `${hazardSnip} ${initialExplanation}`;
+      }
+    }
 
     await saveReport({
       severity: suggestedSeverity,
+      hazardFlags,
       notes,
       lang,
       photo,
@@ -598,6 +700,7 @@ async function handleSubmit(e) {
     });
 
     document.getElementById('notes').value = '';
+    clearHazardChips();
     statusEl.textContent = 'Saved locally. Will sync automatically when online.';
     renderReportList();
     if (navigator.onLine) trySync(statusEl);
@@ -672,6 +775,7 @@ window.addEventListener('DOMContentLoaded', () => {
   updateAIBadge('template');
   checkGeminiNanoReady();
   startCamera();
+  setupHazardChips();
   renderReportList();
   document.getElementById('reportForm').addEventListener('submit', handleSubmit);
   document.getElementById('installBtn')?.addEventListener('click', handleInstall);

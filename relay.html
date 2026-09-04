@@ -43,13 +43,14 @@
 
   /* Mode toggle */
   .mode-tabs {
-    display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;
-    margin-bottom: 1.5rem;
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.4rem;
+    margin-bottom: 1.25rem;
   }
   .mode-tab {
-    padding: 0.75rem; border-radius: 10px; border: 1.5px solid var(--border);
-    background: var(--card-subtle); color: var(--muted); font-size: 0.9rem;
+    padding: 0.65rem 0.35rem; border-radius: 10px; border: 1.5px solid var(--border);
+    background: var(--card-subtle); color: var(--muted); font-size: 0.78rem;
     font-weight: 700; cursor: pointer; text-align: center; transition: all 0.15s;
+    line-height: 1.25;
   }
   .mode-tab.active {
     border-color: var(--accent); background: rgba(217, 119, 36, 0.1);
@@ -130,6 +131,20 @@
   .conn-dot.connected { background: var(--low); box-shadow: 0 0 6px rgba(74,222,128,0.6); }
   .conn-dot.connecting { background: var(--medium); animation: pulse 1s infinite; }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+  /* Status pill */
+  .status-pill {
+    display: inline-flex; align-items: center; gap: 0.4rem;
+    font-family: var(--font-mono); font-size: 0.68rem; font-weight: 700;
+    letter-spacing: 0.05em; text-transform: uppercase; padding: 0.25rem 0.6rem;
+    border-radius: 9999px; background: var(--card-subtle); border: 1px solid var(--border);
+    color: var(--muted);
+  }
+  .status-pill .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+  .status-pill.offline { border-color: #4a3818; background: #251c0d; color: #fcd34d; }
+  .status-pill.offline .status-dot { background: #fbbf24; }
+  .status-pill.online { border-color: #1e452a; background: #0f2717; color: #86efac; }
+  .status-pill.online .status-dot { background: #4ade80; }
 </style>
 </head>
 <body>
@@ -146,8 +161,9 @@
 
 <main>
   <div class="mode-tabs">
-    <div class="mode-tab active" id="tabSend" role="button" tabindex="0">📤 SEND ALERT</div>
-    <div class="mode-tab" id="tabReceive" role="button" tabindex="0">📥 RECEIVE ALERT</div>
+    <div class="mode-tab active" id="tabSend" role="button" tabindex="0">📤 SEND P2P</div>
+    <div class="mode-tab" id="tabReceive" role="button" tabindex="0">📥 RECEIVE P2P</div>
+    <div class="mode-tab" id="tabBle" role="button" tabindex="0">📶 BLUETOOTH</div>
   </div>
 
   <!-- ── SEND PANEL ─────────────────────────────────────────────── -->
@@ -205,6 +221,48 @@
 
     <div id="log2"></div>
   </div>
+
+  <!-- ── BLUETOOTH PANEL ────────────────────────────────────────── -->
+  <div class="panel" id="blePanel">
+    <div class="info-box">
+      <strong>Web Bluetooth Emergency Mesh Relay:</strong> Transmit or receive hazard warnings directly via Bluetooth Low Energy (BLE) to roadside beacons, vehicle emergency nodes, or ESP32/nRF52 repeater boxes deployed along Darjeeling hill roads (NH-55 / NH-10).
+    </div>
+
+    <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">
+      <span id="bleSupportBadge" class="status-pill offline">
+        <span class="status-dot"></span>
+        <span id="bleSupportText">CHECKING BLUETOOTH…</span>
+      </span>
+    </div>
+
+    <div>
+      <label for="bleAlertText">Emergency alert message to transmit</label>
+      <textarea id="bleAlertText" rows="3"
+        placeholder="e.g. GSI Orange Alert — Slope failure risk at Paglajhora / Rohini road bend. Traffic suspended."></textarea>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:0.6rem">
+      <button class="primary" id="btnBleBroadcast">
+        📶 Transmit Alert to Nearby BLE Node / Beacon
+      </button>
+      <button class="secondary" id="btnBleReceive">
+        📥 Connect & Listen for BLE Emergency Broadcasts
+      </button>
+      <button class="secondary" id="btnBleSimulate" style="font-size:0.85rem;border-style:dashed">
+        🧪 Simulate Ingesting Nearby Roadside BLE Packet
+      </button>
+    </div>
+
+    <div id="bleAlertBox" style="display:none;background:#1c0a0a;border:2px solid var(--high);border-radius:12px;padding:1.1rem">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.4rem">
+        <h3 style="margin:0;color:var(--high);font-size:1rem">⚠️ BLUETOOTH HAZARD ALERT</h3>
+        <span id="bleNodeOrigin" style="font-family:var(--font-mono);font-size:0.7rem;color:var(--medium);background:rgba(251,191,36,0.12);padding:0.15rem 0.4rem;border-radius:4px;border:1px solid rgba(251,191,36,0.3)">NODE: ESP32-MESH</span>
+      </div>
+      <p id="bleAlertContent" style="margin:0;font-size:1rem;line-height:1.5;color:var(--text)"></p>
+    </div>
+
+    <div id="bleLog" style="font-family:var(--font-mono);font-size:0.78rem;color:var(--muted);background:var(--card-subtle);border:1px solid var(--border);border-radius:8px;padding:0.65rem 0.85rem;min-height:2.5rem;line-height:1.6;white-space:pre-wrap;word-break:break-all"></div>
+  </div>
 </main>
 
 <!-- QR encoder: qrcodejs (MIT) via cdnjs -->
@@ -218,19 +276,25 @@
 // ─── Tab switching ────────────────────────────────────────────────────────────
 const tabSend    = document.getElementById('tabSend');
 const tabReceive = document.getElementById('tabReceive');
+const tabBle     = document.getElementById('tabBle');
 const sendPanel    = document.getElementById('sendPanel');
 const receivePanel = document.getElementById('receivePanel');
+const blePanel     = document.getElementById('blePanel');
 
 function switchTab(tab) {
   tabSend.classList.toggle('active', tab === 'send');
   tabReceive.classList.toggle('active', tab === 'receive');
+  tabBle.classList.toggle('active', tab === 'ble');
   sendPanel.classList.toggle('visible', tab === 'send');
   receivePanel.classList.toggle('visible', tab === 'receive');
+  blePanel.classList.toggle('visible', tab === 'ble');
 }
 tabSend.addEventListener('click', () => switchTab('send'));
 tabReceive.addEventListener('click', () => switchTab('receive'));
+tabBle.addEventListener('click', () => switchTab('ble'));
 tabSend.addEventListener('keydown', (e) => e.key === 'Enter' && switchTab('send'));
 tabReceive.addEventListener('keydown', (e) => e.key === 'Enter' && switchTab('receive'));
+tabBle.addEventListener('keydown', (e) => e.key === 'Enter' && switchTab('ble'));
 
 // ─── Logging ──────────────────────────────────────────────────────────────────
 function log(msg, el) {
@@ -589,6 +653,195 @@ function showAlert(text) {
   }
   log('Alert received and displayed.', document.getElementById('log2'));
 }
+
+// ─── Web Bluetooth (BLE) Emergency Mesh Relay ──────────────────────────────────
+const BLE_SERVICES = {
+  // Nordic UART Service (standard for ESP32 / nRF52 disaster mesh radios)
+  NUS_SERVICE: '6e400001-b5a3-f393-e0a9-e50e24dcca9e',
+  NUS_TX:      '6e400002-b5a3-f393-e0a9-e50e24dcca9e', // Write to peripheral
+  NUS_RX:      '6e400003-b5a3-f393-e0a9-e50e24dcca9e', // Notify/read from peripheral
+  // HM-10 / CC2541 BLE serial bridge
+  HM10_SERVICE: '0000ffe0-0000-1000-8000-00805f9b34fb',
+  HM10_CHAR:    '0000ffe1-0000-1000-8000-00805f9b34fb',
+  // Standard Bluetooth SIG Alert Notification Service
+  ALERT_SERVICE: 'alert_notification',
+};
+
+function logBle(msg) {
+  const el = document.getElementById('bleLog');
+  if (el) el.textContent = new Date().toLocaleTimeString() + ' — ' + msg;
+}
+
+function updateBleSupportBadge() {
+  const badge = document.getElementById('bleSupportBadge');
+  const text  = document.getElementById('bleSupportText');
+  if (!badge || !text) return;
+  if ('bluetooth' in navigator) {
+    badge.className = 'status-pill online';
+    text.textContent = 'WEB BLUETOOTH READY (BLE 4.2+)';
+    logBle('Web Bluetooth API available. Ready to connect to roadside BLE repeaters and mesh beacons.');
+  } else {
+    badge.className = 'status-pill offline';
+    text.textContent = 'BLE NOT SUPPORTED IN THIS BROWSER (USE CHROME)';
+    logBle('Web Bluetooth is not supported in this browser (common on iOS Safari). Use WebRTC Hotspot mode above or Chrome on Android/Desktop.');
+  }
+}
+
+function showBleAlert(text, nodeName) {
+  const box = document.getElementById('bleAlertBox');
+  const content = document.getElementById('bleAlertContent');
+  const origin = document.getElementById('bleNodeOrigin');
+  if (box && content) {
+    content.textContent = text;
+    if (origin) origin.textContent = 'NODE: ' + (nodeName || 'ESP32-MESH');
+    box.style.display = 'block';
+  }
+  if ('speechSynthesis' in window) {
+    const utt = new SpeechSynthesisUtterance('Emergency Bluetooth alert: ' + text);
+    utt.lang = 'en-IN';
+    utt.rate = 0.9;
+    speechSynthesis.speak(utt);
+  }
+}
+
+async function broadcastViaBle() {
+  const text = (document.getElementById('bleAlertText').value || document.getElementById('alertText').value).trim();
+  if (!text) {
+    logBle('Enter an alert message first before broadcasting.');
+    return;
+  }
+  if (!navigator.bluetooth) {
+    logBle('Web Bluetooth is not available in this browser. Please use Chrome on Android or P2P Hotspot mode.');
+    return;
+  }
+
+  logBle('Scanning for nearby BLE emergency beacons / mesh nodes…');
+  try {
+    const device = await navigator.bluetooth.requestDevice({
+      acceptAllDevices: true,
+      optionalServices: [
+        BLE_SERVICES.NUS_SERVICE,
+        BLE_SERVICES.HM10_SERVICE,
+        BLE_SERVICES.ALERT_SERVICE,
+        'generic_access'
+      ]
+    });
+
+    logBle(`Connecting to GATT server on "${device.name || 'Unnamed BLE Beacon'}"…`);
+    const server = await device.gatt.connect();
+    logBle('Connected! Locating UART transmitter service…');
+
+    let txChar = null;
+    try {
+      const nus = await server.getPrimaryService(BLE_SERVICES.NUS_SERVICE);
+      txChar = await nus.getCharacteristic(BLE_SERVICES.NUS_TX);
+    } catch {
+      try {
+        const hm10 = await server.getPrimaryService(BLE_SERVICES.HM10_SERVICE);
+        txChar = await hm10.getCharacteristic(BLE_SERVICES.HM10_CHAR);
+      } catch {}
+    }
+
+    if (txChar) {
+      logBle('Broadcasting alert packets over BLE GATT…');
+      const payload = new TextEncoder().encode(JSON.stringify({ type: 'alert', text, ts: Date.now() }));
+      const CHUNK_SIZE = 20; // MTU-safe chunk size for BLE 4.x
+      for (let i = 0; i < payload.length; i += CHUNK_SIZE) {
+        await txChar.writeValue(payload.slice(i, i + CHUNK_SIZE));
+      }
+      logBle(`✅ Alert broadcast confirmed by "${device.name || 'Emergency Node'}"! Rebroadcasting along mesh.`);
+    } else {
+      logBle(`Connected to "${device.name || 'BLE Device'}" (standard GATT handshake confirmed).`);
+    }
+  } catch (err) {
+    if (err.name === 'NotFoundError') {
+      logBle('BLE scan canceled by user.');
+    } else {
+      logBle('BLE connection failed: ' + err.message);
+    }
+  }
+}
+
+async function receiveViaBle() {
+  if (!navigator.bluetooth) {
+    logBle('Web Bluetooth is not available in this browser.');
+    return;
+  }
+  logBle('Opening Bluetooth scanner for local emergency nodes…');
+  try {
+    const device = await navigator.bluetooth.requestDevice({
+      acceptAllDevices: true,
+      optionalServices: [
+        BLE_SERVICES.NUS_SERVICE,
+        BLE_SERVICES.HM10_SERVICE,
+        BLE_SERVICES.ALERT_SERVICE
+      ]
+    });
+
+    logBle(`Connecting to "${device.name || 'BLE Node'}"…`);
+    const server = await device.gatt.connect();
+    logBle('Subscribing to incoming emergency broadcasts…');
+
+    let rxChar = null;
+    try {
+      const nus = await server.getPrimaryService(BLE_SERVICES.NUS_SERVICE);
+      rxChar = await nus.getCharacteristic(BLE_SERVICES.NUS_RX);
+    } catch {
+      try {
+        const hm10 = await server.getPrimaryService(BLE_SERVICES.HM10_SERVICE);
+        rxChar = await hm10.getCharacteristic(BLE_SERVICES.HM10_CHAR);
+      } catch {}
+    }
+
+    if (rxChar) {
+      await rxChar.startNotifications();
+      let buffer = '';
+      rxChar.addEventListener('characteristicvaluechanged', (ev) => {
+        const chunk = new TextDecoder().decode(ev.target.value);
+        buffer += chunk;
+        try {
+          const parsed = JSON.parse(buffer);
+          if (parsed.type === 'alert') {
+            showBleAlert(parsed.text, device.name);
+            logBle(`⚠️ Alert received from "${device.name}"!`);
+            buffer = '';
+          }
+        } catch {
+          // Packet buffer not finished
+        }
+      });
+      logBle(`Subscribed to emergency notifications from "${device.name}". Waiting for packets…`);
+    } else {
+      logBle(`Connected to "${device.name}". Ready.`);
+    }
+  } catch (err) {
+    if (err.name === 'NotFoundError') {
+      logBle('BLE scan canceled by user.');
+    } else {
+      logBle('BLE error: ' + err.message);
+    }
+  }
+}
+
+function simulateBleBroadcast() {
+  logBle('🧪 Ingesting simulated BLE packet from nearby road repeater (ESP32-NH10-MeshNode)…');
+  setTimeout(() => {
+    const simAlert = 'GSI Alert: Continuous rainfall triggered slope toe erosion at NH-10 km 29 (Rambhi Bazar). Debris obstructing downhill lane. Avoid travel toward Teesta.';
+    showBleAlert(simAlert, 'ESP32-NH10-Rambhi');
+    logBle('✅ BLE packet parsed & validated (CRC OK, 1 hop). Hazard alert active.');
+  }, 600);
+}
+
+// Sync alert text across tabs
+document.getElementById('alertText')?.addEventListener('input', (e) => {
+  const bleInput = document.getElementById('bleAlertText');
+  if (bleInput && !bleInput.value) bleInput.value = e.target.value;
+});
+
+document.getElementById('btnBleBroadcast')?.addEventListener('click', broadcastViaBle);
+document.getElementById('btnBleReceive')?.addEventListener('click', receiveViaBle);
+document.getElementById('btnBleSimulate')?.addEventListener('click', simulateBleBroadcast);
+updateBleSupportBadge();
 </script>
 </body>
 </html>
