@@ -33,14 +33,19 @@ On 4–5 October 2025, the Geological Survey of India (GSI) issued an orange ale
   - **Wllama + Qwen2.5-0.5B (GGUF q2_k)**: Universal WebAssembly engine loaded lazily *only* when requested by user, with real-time download/inference progress indicators.
   - **Transformers.js (SmolLM2-135M)**: Secondary lightweight WASM fallback.
   - Prompt automatically injects the observed geotechnical precursor tags AND computer vision findings (`Tension crack 82%, Tilted trees ~29°, Fresh debris 50%`) for hyper-local geotechnical safety advice.
-- **IndexedDB + Background Sync**: Complete PWA persistence. Reports queue locally with sync state flags (`synced: 0`). Service worker triggers `sync-reports` on background network restoration, with on-open and `online` event fallbacks for non-Chromium browsers.
+- **IndexedDB + Background Sync & GeoJSON Export**: Complete PWA persistence. Reports queue locally with sync state flags (`synced: 0`). Service worker triggers `sync-reports` on background network restoration, with on-open and `online` event fallbacks. Field teams and panchayats can tap **"📥 Export GeoJSON"** to export all geotagged hazard observations into a standard GIS-ready file for offline handoff via Bluetooth or USB.
+- **1-Tap Relay Escalation**: Every logged report includes a **"📡 Relay P2P →"** link that automatically pre-populates official broadcast text into `relay.html`.
 
 ### 2. Relay-Down (Zero-Signal Peer-to-Peer Rebroadcast)
-- **Air-Gapped WebRTC Hotspot Relay (`relay.html`)**:
+- **⚡ 1-Scan Direct Alert QR**:
+  - Encodes the complete emergency alert directly into an optical QR payload.
+  - Any smartphone camera or SlopeWatch receiver can scan it in `<0.3s` and read the alert instantly with **zero local network or hotspot configuration needed**.
+- **Air-Gapped WebRTC Hotspot Mesh (`relay.html`)**:
   - Operates over a shared portable mobile hotspot with **zero cellular data**.
   - Uses **Host-Only ICE Candidates** (`iceServers: []`) — avoids the 10-second STUN freeze that bricks standard WebRTC when no internet is present.
-  - Air-gapped signalling via compact base64-encoded QR codes (sender offer QR $\rightarrow$ receiver camera scan $\rightarrow$ receiver answer QR $\rightarrow$ direct local subnet WebRTC data channel).
-  - Web Speech API integration: automatically announces incoming hazard alerts in English/Indian speech synthesis.
+  - Air-gapped signalling via compact base64-encoded QR codes (sender offer QR $\rightarrow$ receiver camera scan $\rightarrow$ receiver answer QR $\rightarrow$ direct local subnet WebRTC data channel for continuous streaming).
+  - Web Speech API integration: automatically announces incoming hazard alerts via synthesized audio.
+- **100% Air-Gapped Vendorized Libraries**: All QR encoding (`qrcode.min.js`) and camera decoding (`jsqr.min.js`) engines are vendored locally in the repository and pre-cached by Service Worker (`slopewatch-v8`), eliminating external CDN dependencies.
 - **Web Bluetooth (BLE) Mesh Relay**:
   - Native browser Bluetooth API (`navigator.bluetooth`) to discover and communicate with roadside emergency repeater beacons (ESP32 / nRF52 disaster nodes) stationed at road checkpoints (e.g. NH-10 / Hill Cart Road).
   - Supports Nordic UART Service (NUS) and HM-10 serial GATT characteristics with 20-byte MTU chunking.

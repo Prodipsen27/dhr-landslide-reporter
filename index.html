@@ -854,6 +854,58 @@
     transform: scale(0.95);
   }
 
+  .btn-subtle {
+    width: auto;
+    min-height: auto;
+    margin: 0;
+    padding: 0.28rem 0.6rem;
+    background: var(--card-subtle);
+    color: var(--muted);
+    font-size: 0.75rem;
+    font-family: var(--font-mono);
+    font-weight: 700;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+    box-shadow: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    transition: all 0.15s ease;
+  }
+  .btn-subtle:hover {
+    color: var(--text);
+    border-color: var(--border-focus);
+    background: var(--card);
+  }
+  .btn-subtle:active {
+    transform: scale(0.96);
+  }
+
+  .btn-relay-link {
+    font-family: var(--font-mono);
+    font-size: 0.74rem;
+    font-weight: 700;
+    color: var(--accent);
+    text-decoration: none;
+    padding: 0.25rem 0.55rem;
+    border: 1px solid rgba(217, 119, 36, 0.4);
+    background: rgba(217, 119, 36, 0.08);
+    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    transition: all 0.15s ease;
+  }
+  .btn-relay-link:hover {
+    background: rgba(217, 119, 36, 0.2);
+    border-color: var(--accent);
+    color: #fff;
+  }
+  .btn-relay-link:active {
+    transform: scale(0.96);
+  }
+
   .report-thumb {
     width: 100%;
     max-height: 180px;
@@ -1057,6 +1109,10 @@
 
   <div class="section-header-wrap">
     <h2 id="reportsHeading">Your reports</h2>
+    <div style="display:flex;gap:0.4rem;align-items:center">
+      <button type="button" class="btn-subtle" id="btnSyncNow" title="Check connection and sync queued reports">🔄 Sync Now</button>
+      <button type="button" class="btn-subtle" id="btnExportData" title="Export observations as GeoJSON for offline sharing">📥 Export GeoJSON</button>
+    </div>
   </div>
   <ul id="reportList"></ul>
 </main>

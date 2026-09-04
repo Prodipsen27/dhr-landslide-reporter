@@ -93,6 +93,18 @@
   }
   button.secondary:hover { border-color: var(--accent); color: var(--accent); }
 
+  /* Presets */
+  .preset-row {
+    display: flex; gap: 0.4rem; overflow-x: auto; padding-bottom: 0.3rem; margin-bottom: 0.5rem;
+    -webkit-overflow-scrolling: touch;
+  }
+  .preset-chip {
+    white-space: nowrap; font-size: 0.74rem; font-weight: 600; padding: 0.3rem 0.6rem;
+    border-radius: 9999px; background: var(--card-subtle); border: 1px solid var(--border);
+    color: var(--muted); cursor: pointer; transition: all 0.15s ease;
+  }
+  .preset-chip:hover { border-color: var(--accent); color: var(--text); background: var(--card); }
+
   /* QR display */
   #qrWrap {
     display: none; flex-direction: column; align-items: center; gap: 0.75rem;
@@ -174,12 +186,24 @@
     </div>
 
     <div>
-      <label for="alertText">Official alert message</label>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.35rem">
+        <label for="alertText" style="margin:0">Official alert message</label>
+        <span style="font-size:0.75rem;color:var(--muted)">Tap preset or type</span>
+      </div>
+      <div class="preset-row" id="alertPresets">
+        <button type="button" class="preset-chip" data-preset="GSI Orange Alert: Severe landslide risk across Darjeeling hills (Ghum, Kurseong, Mirik). Saturated slopes vulnerable. Avoid steep road cuts.">🏔️ GSI Orange</button>
+        <button type="button" class="preset-chip" data-preset="IMD Red Alert: 300mm+ extreme rainfall forecast. Teesta valley road link & Kalimpong slopes at critical saturation.">🌧️ IMD Red</button>
+        <button type="button" class="preset-chip" data-preset="Road Hazard: Active rockfall & slope toe erosion at NH-10 km 29 (Rambhi Bazar). Downhill corridor blocked.">🪨 NH-10 Rockfall</button>
+        <button type="button" class="preset-chip" data-preset="Flash Flood Alert: Dudhia bridge river discharge critical. Low-lying Mechi & Balason settlements evacuate to high ground immediately.">🌊 Dudhia Flood</button>
+      </div>
       <textarea id="alertText" rows="4"
         placeholder="e.g. GSI Orange Alert — Darjeeling hills. High landslide risk near Ghum, Kurseong, and Mirik. Avoid slopes and low-lying roads. Issued 04 Oct 2025 22:00 IST."></textarea>
     </div>
 
-    <button class="primary" id="btnGenerateOffer">📡 Generate QR code to share</button>
+    <div style="display:flex;flex-direction:column;gap:0.5rem">
+      <button class="primary" id="btnGenerateDirectQR">⚡ 1-Scan Direct Alert QR (Instant to Any Phone)</button>
+      <button class="secondary" id="btnGenerateOffer" style="border-style:dashed">🔗 WebRTC Hotspot Mesh (Host-Only ICE Data Channel)</button>
+    </div>
 
     <div id="qrWrap">
       <canvas id="qrCanvas" width="240" height="240"></canvas>
@@ -265,10 +289,9 @@
   </div>
 </main>
 
-<!-- QR encoder: qrcodejs (MIT) via cdnjs -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<!-- jsQR for QR decoding from camera -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jsqr/1.4.0/jsQR.min.js"></script>
+<!-- Local Vendorized QR libraries (100% offline air-gapped) -->
+<script src="./qrcode.min.js"></script>
+<script src="./jsqr.min.js"></script>
 
 <script>
 'use strict';
@@ -376,7 +399,38 @@ function decompressSDP(b64) {
   return atob(b64).split('|').join('\n');
 }
 
-// ─── SEND: Generate offer ──────────────────────────────────────────────────────
+// ─── SEND: Direct Alert QR (1-Scan Instant Broadcast) ─────────────────────────
+document.getElementById('btnGenerateDirectQR')?.addEventListener('click', () => {
+  const alertText = document.getElementById('alertText').value.trim();
+  if (!alertText) { log('Enter or select an alert message first.'); return; }
+
+  closePeer();
+  const payload = JSON.stringify({
+    v: 1,
+    type: 'direct_alert',
+    text: alertText,
+    ts: Date.now()
+  });
+
+  renderQR(payload);
+  const qrWrap = document.getElementById('qrWrap');
+  qrWrap.classList.add('visible');
+  document.getElementById('qrInstruction').innerHTML =
+    '<strong>⚡ 1-Scan Direct Alert QR</strong><br>' +
+    'Point any phone camera or SlopeWatch receiver at this QR.<br>' +
+    'Displays instantly with zero configuration (no hotspot required).';
+
+  const connDot = document.getElementById('connDot');
+  const connText = document.getElementById('connText');
+  if (connDot) connDot.className = 'conn-dot connected';
+  if (connText) connText.textContent = 'Direct Alert QR Active';
+  log('⚡ Direct Alert QR generated. Ready to broadcast.');
+
+  const old = document.getElementById('answerScanSection');
+  if (old) old.remove();
+});
+
+// ─── SEND: Generate offer (WebRTC Hotspot Mesh) ────────────────────────────────
 document.getElementById('btnGenerateOffer').addEventListener('click', async () => {
   const alertText = document.getElementById('alertText').value.trim();
   if (!alertText) { log('Enter an alert message first.'); return; }
@@ -536,13 +590,43 @@ function startQRScan(video) {
       if (code) {
         scanStream.getTracks().forEach(t => t.stop());
         document.getElementById('scanWrap').style.display = 'none';
-        handleOfferQR(code.data);
+        handleScannedQR(code.data);
         return;
       }
     }
     scanRaf = requestAnimationFrame(scan);
   }
   scanRaf = requestAnimationFrame(scan);
+}
+
+async function handleScannedQR(data) {
+  const logEl = document.getElementById('log2');
+  try {
+    let parsed = null;
+    try { parsed = JSON.parse(data); } catch {}
+
+    if (parsed) {
+      if (parsed.type === 'direct_alert' || parsed.type === 'alert' || parsed.alert) {
+        showAlert(parsed.text || parsed.alert || data);
+        log('⚡ Direct Hazard Alert received via optical QR scan!', logEl);
+        return;
+      }
+      if (parsed.role === 'offer') {
+        handleOfferQR(data);
+        return;
+      }
+      if (parsed.role === 'answer') {
+        handleAnswerQR(data);
+        return;
+      }
+    }
+
+    // Standard plain text encoded QR
+    showAlert(data);
+    log('⚡ Alert received from scanned QR code!', logEl);
+  } catch (err) {
+    log('QR processing error: ' + err.message, logEl);
+  }
 }
 
 async function handleOfferQR(data) {
@@ -842,6 +926,32 @@ document.getElementById('btnBleBroadcast')?.addEventListener('click', broadcastV
 document.getElementById('btnBleReceive')?.addEventListener('click', receiveViaBle);
 document.getElementById('btnBleSimulate')?.addEventListener('click', simulateBleBroadcast);
 updateBleSupportBadge();
+
+// ─── Preset Chips Handler ───────────────────────────────────────────────────
+document.querySelectorAll('#alertPresets .preset-chip').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const text = btn.getAttribute('data-preset');
+    const alertInput = document.getElementById('alertText');
+    const bleInput = document.getElementById('bleAlertText');
+    if (alertInput) alertInput.value = text;
+    if (bleInput) bleInput.value = text;
+    log('Loaded preset: ' + btn.textContent.trim());
+  });
+});
+
+// ─── URL Query Parameter Handler (From SlopeWatch Observation) ───────────────
+try {
+  const urlParams = new URLSearchParams(window.location.search);
+  const incoming = urlParams.get('alert') || urlParams.get('text');
+  if (incoming) {
+    const decoded = decodeURIComponent(incoming);
+    const alertInput = document.getElementById('alertText');
+    const bleInput = document.getElementById('bleAlertText');
+    if (alertInput) alertInput.value = decoded;
+    if (bleInput) bleInput.value = decoded;
+    log('Loaded hazard alert from SlopeWatch field observation.');
+  }
+} catch (e) {}
 </script>
 </body>
 </html>

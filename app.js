@@ -557,19 +557,66 @@ function updateAIBadge(state) {
   badge.textContent = cfg.dot + ' ' + cfg.label;
 }
 
-// ─── Sync ─────────────────────────────────────────────────────────────────────
+// ─── Sync & Export ────────────────────────────────────────────────────────────
 
 async function trySync(statusEl) {
+  const el = statusEl || document.getElementById('status');
   if (!navigator.onLine) {
-    statusEl.textContent = 'Offline — reports will sync when you have a connection.';
+    if (el) el.textContent = 'Offline — reports will sync when you have a connection.';
     return;
   }
   const reports = await getAllReports();
   const pending = reports.filter((r) => !r.synced);
-  if (pending.length === 0) { statusEl.textContent = 'All reports synced.'; return; }
+  if (pending.length === 0) {
+    if (el) el.textContent = 'All reports synced.';
+    return;
+  }
   for (const r of pending) await markSynced(r.id);
-  statusEl.textContent = `Synced ${pending.length} report(s).`;
+  if (el) el.textContent = `Synced ${pending.length} report(s).`;
   renderReportList();
+}
+
+async function exportAllReports() {
+  const reports = await getAllReports();
+  if (!reports || reports.length === 0) {
+    alert('No observation reports recorded yet to export.');
+    return;
+  }
+  const geojson = {
+    type: 'FeatureCollection',
+    metadata: {
+      generatedAt: new Date().toISOString(),
+      generator: 'SlopeWatch Field Reporter (Darjeeling Hills)',
+      totalObservations: reports.length
+    },
+    features: reports.map((r) => ({
+      type: 'Feature',
+      geometry: r.location ? {
+        type: 'Point',
+        coordinates: [r.location.lng, r.location.lat]
+      } : null,
+      properties: {
+        id: r.id,
+        severity: r.severity,
+        precursors: r.hazardFlags || [],
+        visionSummary: r.visionSummary || null,
+        notes: r.notes || '',
+        explanation: r.explanation,
+        createdAt: new Date(r.createdAt).toISOString(),
+        synced: r.synced === 1
+      }
+    }))
+  };
+
+  const blob = new Blob([JSON.stringify(geojson, null, 2)], { type: 'application/geo+json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `slopewatch-hazards-${new Date().toISOString().slice(0, 10)}.geojson`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 // ─── Camera ───────────────────────────────────────────────────────────────────
@@ -735,11 +782,14 @@ async function renderReportList() {
     explanation.textContent = r.explanation;
     li.appendChild(explanation);
 
+    const actionRow = document.createElement('div');
+    actionRow.style.cssText = 'display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.4rem;margin-top:0.2rem';
+
     if (r.explanationSource === 'ai') {
       const aiTag = document.createElement('span');
       aiTag.className = 'ai-enhanced-badge';
       aiTag.textContent = '✦ AI-Enhanced';
-      li.appendChild(aiTag);
+      actionRow.appendChild(aiTag);
     } else {
       const improveBtn = document.createElement('button');
       improveBtn.className = 'btn-improve-ai';
@@ -747,8 +797,18 @@ async function renderReportList() {
       improveBtn.textContent = '✨ Improve with AI';
       improveBtn.title = 'Generate dynamic explanation with on-device model';
       improveBtn.addEventListener('click', () => handleImproveWithAI(r, li, explanation, improveBtn));
-      li.appendChild(improveBtn);
+      actionRow.appendChild(improveBtn);
     }
+
+    const relayBtn = document.createElement('a');
+    relayBtn.className = 'btn-relay-link';
+    const hazardMsg = `${r.severity.toUpperCase()} RISK: ${r.notes || 'Slope hazard observed'}. Signs: ${(r.hazardFlags || []).join(', ') || 'Slope movement'}. Advice: ${r.explanation}`;
+    relayBtn.href = `./relay.html?alert=${encodeURIComponent(hazardMsg)}`;
+    relayBtn.textContent = '📡 Relay P2P →';
+    relayBtn.title = 'Broadcast this hazard alert to nearby phones without signal';
+    actionRow.appendChild(relayBtn);
+
+    li.appendChild(actionRow);
 
     const meta = document.createElement('div');
     meta.className = 'report-meta';
@@ -1132,6 +1192,8 @@ window.addEventListener('DOMContentLoaded', () => {
   renderReportList();
   document.getElementById('reportForm').addEventListener('submit', handleSubmit);
   document.getElementById('btnScanImage')?.addEventListener('click', handleScanViewfinder);
+  document.getElementById('btnSyncNow')?.addEventListener('click', () => trySync());
+  document.getElementById('btnExportData')?.addEventListener('click', exportAllReports);
   document.getElementById('installBtn')?.addEventListener('click', handleInstall);
   trySync(document.getElementById('status'));
 
