@@ -512,6 +512,164 @@
     margin-top: 0.1rem;
   }
 
+  /* Vision scanner & action bar */
+  .vision-action-bar {
+    margin-top: 0.6rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+
+  .btn-vision-scan {
+    background: #172a1d;
+    border: 1.5px solid #2e6939;
+    color: #86efac;
+    padding: 0.65rem 1rem;
+    border-radius: 10px;
+    font-size: 0.88rem;
+    font-weight: 700;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    transition: all 0.15s ease;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    width: 100%;
+    min-height: 44px;
+  }
+
+  .btn-vision-scan:hover {
+    background: #1e3826;
+    border-color: #4ade80;
+    color: #fff;
+  }
+
+  .btn-vision-scan:active {
+    transform: scale(0.985);
+  }
+
+  .vision-scan-overlay {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 4;
+    overflow: hidden;
+    background: rgba(11, 20, 14, 0.35);
+  }
+
+  .scan-laser {
+    position: absolute;
+    left: 0; right: 0; height: 2px;
+    background: #4ade80;
+    box-shadow: 0 0 12px #4ade80, 0 0 4px #fff;
+    animation: scanAnim 1.4s ease-in-out infinite alternate;
+  }
+
+  @keyframes scanAnim {
+    0% { top: 10%; }
+    100% { top: 90%; }
+  }
+
+  .vision-scan-text {
+    position: absolute;
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    background: rgba(0, 0, 0, 0.85);
+    color: #4ade80;
+    padding: 0.25rem 0.65rem;
+    border-radius: 4px;
+    border: 1px solid #2e6939;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  /* Vision results panel */
+  .vision-results-panel {
+    margin-top: 0.65rem;
+    background: var(--card);
+    border: 1.5px solid var(--border);
+    border-radius: 10px;
+    padding: 0.75rem 0.95rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .vision-results-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .vision-results-title {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--muted);
+  }
+
+  .vision-status-tag {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 700;
+    padding: 0.15rem 0.45rem;
+    border-radius: 4px;
+    background: rgba(217, 119, 36, 0.15);
+    color: #fbd38d;
+    border: 1px solid rgba(217, 119, 36, 0.4);
+  }
+
+  .vision-detections-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+
+  .vision-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: var(--card-subtle);
+    border: 1px solid var(--border);
+    padding: 0.35rem 0.6rem;
+    border-radius: 6px;
+    font-size: 0.8rem;
+  }
+
+  .vision-item-left {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    color: var(--text);
+  }
+
+  .vision-item-score {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #4ade80;
+  }
+  .vision-item-score.medium { color: #fbbf24; }
+  .vision-item-score.high   { color: #f87171; }
+
+  .report-vision-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: #86efac;
+    background: rgba(74, 222, 128, 0.08);
+    border: 1px solid rgba(74, 222, 128, 0.25);
+    padding: 0.2rem 0.55rem;
+    border-radius: 6px;
+  }
+
   /* Tactile Action Buttons */
   button {
     font-family: var(--font-sans);
@@ -803,9 +961,30 @@
       <span class="sensor-dot"></span>
       <span>FIELD CAMERA</span>
     </div>
+    <div id="visionScanOverlay" class="vision-scan-overlay" style="display:none">
+      <div class="scan-laser"></div>
+      <div id="visionScanText" class="vision-scan-text">SCANNING SLOPE GEOMETRY…</div>
+    </div>
   </div>
   <canvas id="captureCanvas"></canvas>
   <p id="cameraError"></p>
+
+  <!-- Vision Analysis Action Bar -->
+  <div class="vision-action-bar">
+    <button type="button" id="btnScanImage" class="btn-vision-scan">
+      <span>🔍</span>
+      <span>AI Visual Scan (Cracks · Tilted Trees · Debris)</span>
+    </button>
+  </div>
+
+  <!-- Vision Analysis Results Card -->
+  <div id="visionResultsPanel" class="vision-results-panel" style="display:none">
+    <div class="vision-results-header">
+      <span class="vision-results-title">🧠 On-Device Vision Analysis</span>
+      <span id="visionOverallStatus" class="vision-status-tag">HAZARDS IDENTIFIED</span>
+    </div>
+    <div id="visionDetectionsList" class="vision-detections-list"></div>
+  </div>
 
   <form id="reportForm">
     <div class="form-group">
