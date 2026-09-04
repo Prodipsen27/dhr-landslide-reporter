@@ -1,5 +1,5 @@
 // Bump this on every deploy so old caches get cleared.
-const CACHE_NAME = 'slopewatch-v1';
+const CACHE_NAME = 'slopewatch-v3';
 const CORE_ASSETS = [
   './',
   './index.html',
@@ -34,14 +34,13 @@ self.addEventListener('fetch', (event) => {
       if (cached) return cached;
       return fetch(event.request)
         .then((response) => {
-          // Opportunistically cache same-origin responses (e.g. model files) for next time.
           if (response.ok && event.request.url.startsWith(self.location.origin)) {
             const clone = response.clone();
             caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
           }
           return response;
         })
-        .catch(() => cached); // still offline and not cached: fail gracefully
+        .catch(() => cached || new Response('Offline', { status: 503, statusText: 'Service Unavailable' }));
     })
   );
 });
