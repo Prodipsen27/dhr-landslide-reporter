@@ -624,6 +624,67 @@
     border: 1px solid rgba(217, 119, 36, 0.4);
   }
 
+  .neural-labels-wrap {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    align-items: center;
+    background: var(--card-subtle);
+    border: 1px solid var(--border);
+    padding: 0.35rem 0.6rem;
+    border-radius: 6px;
+    min-height: 28px;
+  }
+  .neural-pill {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: #38bdf8;
+    background: rgba(56, 189, 248, 0.12);
+    border: 1px solid rgba(56, 189, 248, 0.3);
+    padding: 0.12rem 0.45rem;
+    border-radius: 4px;
+  }
+
+  .vision-ai-advice-wrap {
+    background: #0f1c13;
+    border: 1.5px solid #234d2c;
+    border-radius: 8px;
+    padding: 0.65rem 0.85rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+  .vision-ai-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .vision-ai-title {
+    font-size: 0.8rem;
+    font-weight: 800;
+    color: #4ade80;
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+  .vision-ai-badge {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: var(--accent);
+    background: rgba(217, 119, 36, 0.15);
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    border: 1px solid rgba(217, 119, 36, 0.3);
+  }
+  .vision-ai-text {
+    margin: 0;
+    font-size: 0.88rem;
+    line-height: 1.45;
+    color: var(--text);
+  }
+
   .vision-detections-list {
     display: flex;
     flex-direction: column;
@@ -1019,13 +1080,14 @@
 <main>
   <div id="cameraWrap">
     <video id="camera" autoplay playsinline muted></video>
+    <img id="activeSlopeImg" style="display:none;width:100%;height:100%;object-fit:cover;position:absolute;top:0;left:0;" alt="Active slope frame" />
     <div class="reticle reticle-tl" aria-hidden="true"></div>
     <div class="reticle reticle-tr" aria-hidden="true"></div>
     <div class="reticle reticle-bl" aria-hidden="true"></div>
     <div class="reticle reticle-br" aria-hidden="true"></div>
     <div class="viewfinder-tag" aria-hidden="true">
       <span class="sensor-dot"></span>
-      <span>FIELD CAMERA</span>
+      <span id="viewfinderLabel">FIELD CAMERA</span>
     </div>
     <div id="visionScanOverlay" class="vision-scan-overlay" style="display:none">
       <div class="scan-laser"></div>
@@ -1036,20 +1098,55 @@
   <p id="cameraError"></p>
 
   <!-- Vision Analysis Action Bar -->
-  <div class="vision-action-bar">
+  <div class="vision-action-bar" style="display:flex;gap:0.5rem;flex-direction:column">
     <button type="button" id="btnScanImage" class="btn-vision-scan">
       <span>🔍</span>
-      <span>AI Visual Scan (Cracks · Tilted Trees · Debris)</span>
+      <span>AI Visual Scan (Live Camera / Active Frame)</span>
     </button>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.4rem">
+      <label for="imageUploadInput" class="btn-subtle" style="text-align:center;justify-content:center;cursor:pointer;padding:0.45rem">
+        📁 Upload Slope Photo
+      </label>
+      <input type="file" id="imageUploadInput" accept="image/*" style="display:none">
+      <select id="presetSlopeSelect" class="btn-subtle" style="padding:0.45rem;cursor:pointer;width:100%">
+        <option value="">🧪 Test Field Scenarios…</option>
+        <option value="crack">1. ⚡ Batasia Tension Crack</option>
+        <option value="tree">2. 🌲 Paglajhora Tilted Trees</option>
+        <option value="debris">3. 🪨 NH-10 Rockfall & Talus</option>
+        <option value="stable">4. 🌿 Stable Grassy Slope</option>
+      </select>
+    </div>
   </div>
 
   <!-- Vision Analysis Results Card -->
   <div id="visionResultsPanel" class="vision-results-panel" style="display:none">
     <div class="vision-results-header">
-      <span class="vision-results-title">🧠 On-Device Vision Analysis</span>
+      <span class="vision-results-title">🧠 On-Device Multi-Model Vision</span>
       <span id="visionOverallStatus" class="vision-status-tag">HAZARDS IDENTIFIED</span>
     </div>
-    <div id="visionDetectionsList" class="vision-detections-list"></div>
+
+    <!-- MediaPipe Neural Classification Output -->
+    <div style="display:flex;flex-direction:column;gap:0.25rem">
+      <span style="font-size:0.72rem;color:var(--muted);font-weight:700">MediaPipe Neural Labels (EfficientNet-Lite):</span>
+      <div id="visionNeuralLabels" class="neural-labels-wrap">
+        <span class="neural-pill">Evaluating frame…</span>
+      </div>
+    </div>
+
+    <!-- Geotechnical Geometric Physics Telemetry -->
+    <div style="display:flex;flex-direction:column;gap:0.25rem">
+      <span style="font-size:0.72rem;color:var(--muted);font-weight:700">Geotechnical Failure Telemetry:</span>
+      <div id="visionDetectionsList" class="vision-detections-list"></div>
+    </div>
+
+    <!-- Actual On-Device AI Diagnosis Box -->
+    <div id="visionAiAdviceWrap" class="vision-ai-advice-wrap">
+      <div class="vision-ai-header">
+        <span class="vision-ai-title">🤖 Local AI Geotechnical Diagnosis</span>
+        <span id="visionAiModelBadge" class="vision-ai-badge">ON-DEVICE AI</span>
+      </div>
+      <p id="visionAiAdviceText" class="vision-ai-text">Synthesizing edge AI response…</p>
+    </div>
   </div>
 
   <form id="reportForm">

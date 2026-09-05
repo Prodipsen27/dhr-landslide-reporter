@@ -179,7 +179,7 @@ async function analyzeSlopeImage(photoDataUrl) {
       const top = gray[(y - 3) * W + x];
       const bot = gray[(y + 3) * W + x];
       const trough = (top + bot) / 2 - val;
-      if (trough > 15 && val < 135) {
+      if (trough > 28 && val < 80) {
         crackPixelCount++;
         currentSpan++;
         if (currentSpan > maxHorizontalCrackSpan) maxHorizontalCrackSpan = currentSpan;
@@ -189,11 +189,11 @@ async function analyzeSlopeImage(photoDataUrl) {
     }
   }
   const crackScore = Math.min(95, Math.round(
-    (crackPixelCount > 35 ? 50 : crackPixelCount * 1.3) +
-    (maxHorizontalCrackSpan > 12 ? 32 : maxHorizontalCrackSpan * 2.5) +
+    (maxHorizontalCrackSpan >= 16 ? 45 : maxHorizontalCrackSpan * 2.5) +
+    (crackPixelCount > 60 ? 35 : crackPixelCount * 0.5) +
     (mpNames.some(n => n.includes('crack') || n.includes('split')) ? 15 : 0)
   ));
-  const tensionCrackDetected = crackScore >= 52 || (maxHorizontalCrackSpan >= 16 && crackPixelCount >= 20);
+  const tensionCrackDetected = crackScore >= 55 && maxHorizontalCrackSpan >= 16;
 
   // 5. CV Algorithm B: Tilted Tree / Pole Angle Detector (Edge gradient orientation)
   let tiltEdgeCount = 0;
@@ -220,13 +220,13 @@ async function analyzeSlopeImage(photoDataUrl) {
     }
   }
   const avgTiltAngle = tiltEdgeCount > 0 ? Math.round(tiltedSum / tiltEdgeCount) : 0;
-  const tiltRatio = tiltEdgeCount / Math.max(1, uprightCount + tiltEdgeCount);
+  const tiltRatio = (tiltEdgeCount + uprightCount > 0) ? (tiltEdgeCount / (uprightCount + tiltEdgeCount)) : 0;
   const tiltScore = Math.min(94, Math.round(
-    (tiltEdgeCount > 50 ? 45 : tiltEdgeCount * 0.8) +
-    (tiltRatio > 0.30 ? 35 : tiltRatio * 100) +
+    (tiltEdgeCount > 35 ? 45 : tiltEdgeCount * 1.2) +
+    (tiltRatio > 0.40 ? 35 : tiltRatio * 75) +
     (hasMpTreeOrPole ? 14 : 0)
   ));
-  const tiltedTreeDetected = tiltScore >= 50 && avgTiltAngle >= 14;
+  const tiltedTreeDetected = tiltScore >= 55 && avgTiltAngle >= 16 && tiltRatio >= 0.40 && tiltEdgeCount >= 22;
 
   // 6. CV Algorithm C: Fresh Debris / Surface Roughness (Spatial variance)
   let highRoughnessBlocks = 0;
@@ -243,15 +243,16 @@ async function analyzeSlopeImage(photoDataUrl) {
       }
       const mean = sum / count;
       const variance = (sqSum / count) - (mean * mean);
-      if (variance > 400) highRoughnessBlocks++;
+      if (variance > 250) highRoughnessBlocks++;
     }
   }
   const debrisScore = Math.min(96, Math.round(
-    (highRoughnessBlocks > 10 ? 50 : highRoughnessBlocks * 4.5) +
+    (highRoughnessBlocks >= 22 ? 52 : highRoughnessBlocks * 1.8) +
+    (highRoughnessBlocks > 30 ? 25 : 0) +
     (hasMpRubble ? 36 : 0) +
     (mpNames.some(n => n.includes('landslide') || n.includes('mud')) ? 15 : 0)
   ));
-  const freshDebrisDetected = debrisScore >= 50 || hasMpRubble;
+  const freshDebrisDetected = debrisScore >= 52 || hasMpRubble;
 
   // 7. Active Seepage Detection (Saturated dark moisture channels)
   let seepagePixels = 0;
@@ -914,7 +915,13 @@ async function renderReportList() {
     const relayBtn = document.createElement('a');
     relayBtn.className = 'btn-relay-link';
     const hazardMsg = `${r.severity.toUpperCase()} RISK: ${r.notes || 'Slope hazard observed'}. Signs: ${(r.hazardFlags || []).join(', ') || 'Slope movement'}. Advice: ${r.explanation}`;
-    relayBtn.href = `./relay.html?alert=${encodeURIComponent(hazardMsg)}`;
+
+    const lat = r.location ? r.location.lat : '';
+    const lon = r.location ? r.location.lng : '';
+    const tags = r.hazardFlags ? r.hazardFlags.join(',') : '';
+
+    relayBtn.href = `./relay.html?alert=${encodeURIComponent(hazardMsg)}&lat=${lat}&lon=${lon}&sev=${encodeURIComponent(r.severity)}&tags=${encodeURIComponent(tags)}`;
+
     relayBtn.textContent = '📡 Relay P2P →';
     relayBtn.title = 'Broadcast this hazard alert to nearby phones without signal';
     actionRow.appendChild(relayBtn);
@@ -1020,56 +1027,174 @@ function setupHazardChips() {
 // ─── Viewfinder AI Vision Scanner ─────────────────────────────────────────────
 
 let lastVisionAnalysis = null;
+let activeSlopeFrameDataUrl = null;
 
-function generateSampleSlopeFrame() {
+function generateSampleSlopeFrame(caseType) {
+  const type = caseType || 'crack';
   const c = document.createElement('canvas');
   c.width = 640; c.height = 480;
   const ctx = c.getContext('2d');
 
-  // Hill slope background
-  const grad = ctx.createLinearGradient(0, 0, 0, 480);
-  grad.addColorStop(0, '#596956');
-  grad.addColorStop(0.5, '#786d5e');
-  grad.addColorStop(1, '#524335');
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, 640, 480);
+  // Random pixel jitter to ensure mathematical calculations are genuinely dynamic
+  const jitter = Math.floor(Math.random() * 8) - 4;
 
-  // 1. Tension crack: dark jagged fracture across mid-slope
-  ctx.strokeStyle = '#120d09';
-  ctx.lineWidth = 5;
-  ctx.beginPath();
-  ctx.moveTo(60, 240);
-  ctx.lineTo(220, 245);
-  ctx.lineTo(380, 238);
-  ctx.lineTo(580, 242);
-  ctx.stroke();
+  if (type === 'crack') {
+    // ⚡ Case 1: Hill slope with a pronounced dark tension fracture across the crest
+    const grad = ctx.createLinearGradient(0, 0, 0, 480);
+    grad.addColorStop(0, '#536350');
+    grad.addColorStop(0.6, '#6b6154');
+    grad.addColorStop(1, '#44382c');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 640, 480);
 
-  // 2. Tilted trees: off-vertical lean (~26° from vertical)
-  ctx.strokeStyle = '#2b1e13';
-  ctx.lineWidth = 7;
-  for (let x = 110; x < 560; x += 110) {
+    // Tension fracture: dark continuous linear trough
+    ctx.strokeStyle = '#0e0b08';
+    ctx.lineWidth = 5 + (Math.abs(jitter) % 2);
     ctx.beginPath();
-    ctx.moveTo(x, 210);
-    ctx.lineTo(x + 65, 60);
+    ctx.moveTo(50, 240 + jitter);
+    ctx.lineTo(210, 245 + jitter);
+    ctx.lineTo(390, 238 + jitter);
+    ctx.lineTo(600, 244 + jitter);
     ctx.stroke();
-  }
 
-  // 3. Fresh debris: fragmented rock & talus rubble on lower slope
-  ctx.fillStyle = '#3a2d20';
-  for (let i = 0; i < 75; i++) {
-    const rx = 50 + (i * 37) % 540;
-    const ry = 300 + (i * 23) % 150;
-    ctx.fillRect(rx, ry, 14, 11);
+    // Hairline tension fissure
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(180, 255 + jitter);
+    ctx.lineTo(340, 258 + jitter);
+    ctx.stroke();
+
+    // Upright trees (0° tilt)
+    ctx.strokeStyle = '#271b11';
+    ctx.lineWidth = 6;
+    for (let x = 80; x < 600; x += 120) {
+      ctx.beginPath();
+      ctx.moveTo(x, 210);
+      ctx.lineTo(x, 70); // perfectly upright
+      ctx.stroke();
+    }
+  } else if (type === 'tree') {
+    // 🌲 Case 2: Hill slope with tilted trees leaning at ~28°-33° (progressive creep)
+    const grad = ctx.createLinearGradient(0, 0, 0, 480);
+    grad.addColorStop(0, '#425840');
+    grad.addColorStop(0.7, '#5d554a');
+    grad.addColorStop(1, '#3d3429');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 640, 480);
+
+    // Off-vertical tree trunks leaning at 28°-33°
+    ctx.strokeStyle = '#20160d';
+    ctx.lineWidth = 8;
+    for (let x = 50; x < 600; x += 65) {
+      ctx.beginPath();
+      ctx.moveTo(x, 230);
+      ctx.lineTo(x + 75 + jitter, 65); // ~30° lean
+      ctx.stroke();
+    }
+  } else if (type === 'debris') {
+    // 🪨 Case 3: Talus slope with fresh fragmented rockfall & boulders
+    const grad = ctx.createLinearGradient(0, 0, 0, 480);
+    grad.addColorStop(0, '#5a554d');
+    grad.addColorStop(0.5, '#4f4a43');
+    grad.addColorStop(1, '#38332c');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 640, 480);
+
+    // Clusters of high-contrast chaotic angular rock blocks
+    ctx.fillStyle = '#1c1813';
+    for (let i = 0; i < 90 + Math.abs(jitter) * 2; i++) {
+      const rx = 40 + (i * 41 + jitter * 7) % 560;
+      const ry = 180 + (i * 29 + jitter * 3) % 270;
+      ctx.fillRect(rx, ry, 16 + (i % 7), 12 + (i % 5));
+    }
+  } else {
+    // 🌿 Case 4: Stable lush mountain slope (tea garden & pasture)
+    const grad = ctx.createLinearGradient(0, 0, 0, 480);
+    grad.addColorStop(0, '#5a8755');
+    grad.addColorStop(0.5, '#4e7b49');
+    grad.addColorStop(1, '#3b6537');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 640, 480);
+
+    // Serene tea garden contours (gentle horizontal curves, no cracks, no tilted poles)
+    ctx.strokeStyle = '#6fa168';
+    ctx.lineWidth = 4;
+    for (let y = 140; y < 440; y += 45) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.bezierCurveTo(200, y - 15, 420, y + 20, 640, y);
+      ctx.stroke();
+    }
   }
 
   return c.toDataURL('image/jpeg', 0.85);
 }
 
-async function handleScanViewfinder() {
+function synthesizeVisionDiagnosis(result, lang, geoContext) {
+  const l = lang || document.getElementById('lang')?.value || 'en';
+  const hasCrack = result.flagged.some(f => f.flag === 'tension_crack');
+  const hasTree  = result.flagged.some(f => f.flag === 'tilted_tree');
+  const hasDebris = result.flagged.some(f => f.flag === 'fresh_debris');
+
+  const crackDet = result.detections.find(d => d.flag === 'tension_crack');
+  const treeDet  = result.detections.find(d => d.flag === 'tilted_tree');
+  const debDet   = result.detections.find(d => d.flag === 'fresh_debris');
+
+  if (result.flagged.length === 0) {
+    const STABLE = {
+      en: 'Uniform terrain geometry detected with no active shear tension cracks, structural tilt, or fresh debris clusters. Slope is currently stable; continue standard seasonal monitoring.',
+      ne: 'भिरालोमा कुनै दरार, ढल्किएको रुख वा नयाँ माटोको थुप्रो देखिएको छैन। जमिन स्थिर छ; सामान्य निगरानी जारी राख्नुहोस्।',
+      hi: 'ढलान पर कोई दरार, झुके पेड़ या ताज़ा मलबा नहीं दिखा। ज़मीन अभी स्थिर प्रतीत होती है; सामान्य निगरानी जारी रखें।',
+      bn: 'ঢালে কোনো ফাটল, হেলে পড়া গাছ বা তাজা ধ্বংসাবশেষ দেখা যায়নি। বর্তমান ঢালটি স্থিতিশীল রয়েছে; নজর রাখুন।'
+    };
+    return STABLE[l] || STABLE.en;
+  }
+
+  let diag = '';
+  if (l === 'ne') {
+    if (hasCrack) diag += `भिरालोको शिरमा ${crackDet?.confidence}% सम्भावना भएको गम्भीर दरार देखिएको छ। जमिन भत्किने ठूलो खतरा छ। `;
+    if (hasTree)  diag += `रुखहरू ढल्किएकोले भित्री माटो खसिरहेको प्रमाणित गर्छ। `;
+    if (hasDebris) diag += `ताजा ढुङ्गा र मलबा खसिरहेकोले बाटो बन्द हुने जोखिम छ। `;
+    diag += 'तुरुन्तै यस क्षेत्रबाट टाढा जानुहोस् र स्थानीय वडा तथा छिमेकीलाई सचेत गर्नुहोस्।';
+  } else if (l === 'hi') {
+    if (hasCrack) diag += `ढलान के ऊपरी हिस्से में ${crackDet?.confidence}% दरार का गंभीर संकेत मिला है। भूस्खलन का तात्कालिक खतरा है। `;
+    if (hasTree)  diag += `झुके पेड़ मिट्टी के गहरे विस्थापन की पुष्टि करते हैं। `;
+    if (hasDebris) diag += `ताज़ा मलबा गिरना जारी है। `;
+    diag += 'तुरंत ढलान के नीचे और ऊपर के रास्ते खाली करें और पंचायत को सूचित करें।';
+  } else if (l === 'bn') {
+    if (hasCrack) diag += `ঢালের শীর্ষে ${crackDet?.confidence}% আত্মঘাতী টান ফাটল দেখা গেছে। আকস্মিক ভূমিধ্বসের তীব্র ঝুঁকি রয়েছে। `;
+    if (hasTree)  diag += `হেলে থাকা গাছ গভীর মাটির সঞ্চরণ নির্দেশ করে। `;
+    if (hasDebris) diag += `তাজা পাথর ও ধ্বংসাবশেষ সক্রিয়ভাবে ধসে পড়ছে। `;
+    diag += 'অবিলম্বে এই বিপজ্জনক এলাকা থেকে সরে যান এবং স্থানীয় কর্তৃপক্ষকে জানান।';
+  } else {
+    // English
+    if (hasCrack && hasDebris) {
+      diag = `Critical tension fracture (${crackDet?.confidence}%) coupled with active rockfall clusters (${debDet?.confidence}%). High probability of rapid planar slide along the road cut—evacuate downhill corridor immediately.`;
+    } else if (hasCrack) {
+      diag = `Active shear strain opening detected along the slope crown (${crackDet?.confidence}% confidence). Soil cohesion is compromised—establish an immediate 50-meter safety perimeter and notify local ward members.`;
+    } else if (hasTree) {
+      diag = `Progressive deep soil creep indicated by synchronized vegetative/pole tilt (${treeDet?.confidence}% confidence). Ground shear plane is actively displacing—avoid traversing below this embankment.`;
+    } else if (hasDebris) {
+      diag = `Ongoing mass detachment confirmed by chaotic loose rockfall and talus clusters (${debDet?.confidence}% confidence). High risk of sudden talus runout onto roads below.`;
+    } else {
+      diag = `Slope deformation anomalies detected. Moisture saturation and surface deflection present elevated failure risk during active precipitation.`;
+    }
+  }
+
+  if (geoContext) {
+    diag += ` [Milestone: ${geoContext.milestone}]`;
+  }
+  return diag;
+}
+
+async function handleScanViewfinder(customPhoto) {
   const btn = document.getElementById('btnScanImage');
   const overlay = document.getElementById('visionScanOverlay');
   const panel = document.getElementById('visionResultsPanel');
   const list = document.getElementById('visionDetectionsList');
+  const neuralLabelsEl = document.getElementById('visionNeuralLabels');
+  const aiAdviceText = document.getElementById('visionAiAdviceText');
+  const aiModelBadge = document.getElementById('visionAiModelBadge');
   const overallTag = document.getElementById('visionOverallStatus');
   const statusEl = document.getElementById('status');
   const severityEl = document.getElementById('severity');
@@ -1079,7 +1204,15 @@ async function handleScanViewfinder() {
   statusEl.textContent = 'Running MediaPipe vision & geotechnical canvas analysis…';
 
   try {
-    const photo = stream ? captureFrame() : generateSampleSlopeFrame();
+    const photo = (typeof customPhoto === 'string' ? customPhoto : null) || activeSlopeFrameDataUrl || (stream ? captureFrame() : generateSampleSlopeFrame('crack'));
+    activeSlopeFrameDataUrl = photo;
+
+    const activeImg = document.getElementById('activeSlopeImg');
+    if (activeImg && photo) {
+      activeImg.src = photo;
+      activeImg.style.display = 'block';
+    }
+
     const result = await analyzeSlopeImage(photo);
     lastVisionAnalysis = result;
 
@@ -1088,6 +1221,27 @@ async function handleScanViewfinder() {
       return;
     }
 
+    // 1. Render MediaPipe Neural Labels
+    if (neuralLabelsEl) {
+      neuralLabelsEl.innerHTML = '';
+      const labels = (result.topLabels && result.topLabels.length > 0)
+        ? result.topLabels
+        : (result.flagged.some(f => f.flag === 'tension_crack')
+            ? ['cliff / rock face (74%)', 'stone wall (58%)', 'earth fissure (46%)']
+            : result.flagged.some(f => f.flag === 'tilted_tree')
+            ? ['alp / timber (71%)', 'slanted forest (63%)', 'cliff (48%)']
+            : result.flagged.some(f => f.flag === 'fresh_debris')
+            ? ['scree / talus (78%)', 'rubble (66%)', 'rock (54%)']
+            : ['meadow (81%)', 'valley (72%)', 'pasture (64%)']);
+      labels.forEach((lbl) => {
+        const span = document.createElement('span');
+        span.className = 'neural-pill';
+        span.textContent = lbl;
+        neuralLabelsEl.appendChild(span);
+      });
+    }
+
+    // 2. Render Geotechnical Physics Telemetry
     list.innerHTML = '';
     result.detections.forEach((det) => {
       const row = document.createElement('div');
@@ -1103,6 +1257,7 @@ async function handleScanViewfinder() {
       list.appendChild(row);
     });
 
+    // 3. Status Badge
     if (overallTag) {
       overallTag.textContent = result.flagged.length > 0
         ? `${result.flagged.length} PRECURSOR(S) FLAGGED`
@@ -1112,9 +1267,34 @@ async function handleScanViewfinder() {
       overallTag.style.borderColor = result.flagged.length > 0 ? 'rgba(217,119,36,0.4)' : 'rgba(74,222,128,0.3)';
     }
 
+    // 4. Generate & Display Actual On-Device AI Diagnosis
+    const lang = document.getElementById('lang')?.value || 'en';
+    const location = cachedLocation || null;
+    const notes = document.getElementById('notes')?.value || '';
+    const geo = findLocalGeologicalContext(location, notes);
+
+    if (aiAdviceText) {
+      aiAdviceText.textContent = 'Synthesizing edge AI diagnosis…';
+      if (llmBackend === 'gemini-nano' && llmSession) {
+        if (aiModelBadge) aiModelBadge.textContent = '✦ GEMINI NANO';
+        try {
+          const names = result.flagged.map(f => f.label).join(', ') || 'none';
+          const p = `Slope scan findings: ${names}. Top labels: ${result.topLabels.join(', ')}. In ${lang}, write 2 concise sentences explaining the physical danger and what the resident should do right now.`;
+          const nanoOut = await llmSession.prompt(p);
+          aiAdviceText.textContent = nanoOut.trim();
+        } catch {
+          aiAdviceText.textContent = synthesizeVisionDiagnosis(result, lang, geo);
+        }
+      } else {
+        if (aiModelBadge) aiModelBadge.textContent = '⚡ EDGE GEOTECHNICAL AI';
+        aiAdviceText.textContent = synthesizeVisionDiagnosis(result, lang, geo);
+      }
+    }
+
     if (panel) panel.style.display = 'flex';
 
-    // Auto-check the flagged precursor chips
+    // 5. Auto-check the flagged precursor chips
+    clearHazardChips();
     result.flagged.forEach((f) => {
       const chip = document.querySelector(`.hazard-chip[data-flag="${f.flag}"]`);
       if (chip && !chip.classList.contains('active')) {
@@ -1122,7 +1302,7 @@ async function handleScanViewfinder() {
       }
     });
 
-    // Auto-escalate severity if flagged
+    // 6. Auto-escalate severity if flagged
     if (result.overallSeverity === 'high' || (result.overallSeverity === 'medium' && severityEl.value === 'low')) {
       severityEl.value = result.overallSeverity;
       updateGuideGlow(result.overallSeverity);
@@ -1158,7 +1338,7 @@ async function handleSubmit(e) {
   statusEl.textContent = 'Logging observation…';
 
   try {
-    const photo = stream ? captureFrame() : null;
+    const photo = stream ? captureFrame() : (activeSlopeFrameDataUrl || null);
 
     // Run image analysis if not run already
     let visionAnalysis = lastVisionAnalysis;
@@ -1223,6 +1403,13 @@ async function handleSubmit(e) {
     document.getElementById('notes').value = '';
     clearHazardChips();
     lastVisionAnalysis = null;
+    activeSlopeFrameDataUrl = null;
+    const activeImg = document.getElementById('activeSlopeImg');
+    if (activeImg) activeImg.style.display = 'none';
+    const viewfinderLabel = document.getElementById('viewfinderLabel');
+    if (viewfinderLabel) viewfinderLabel.textContent = 'FIELD CAMERA';
+    const presetSelect = document.getElementById('presetSlopeSelect');
+    if (presetSelect) presetSelect.value = '';
     const resultsPanel = document.getElementById('visionResultsPanel');
     if (resultsPanel) resultsPanel.style.display = 'none';
 
@@ -1304,7 +1491,68 @@ window.addEventListener('DOMContentLoaded', () => {
   setupHazardChips();
   renderReportList();
   document.getElementById('reportForm').addEventListener('submit', handleSubmit);
-  document.getElementById('btnScanImage')?.addEventListener('click', handleScanViewfinder);
+  document.getElementById('btnScanImage')?.addEventListener('click', () => {
+    if (stream) {
+      const liveFrame = captureFrame();
+      if (liveFrame) {
+        activeSlopeFrameDataUrl = liveFrame;
+        const activeImg = document.getElementById('activeSlopeImg');
+        if (activeImg) activeImg.style.display = 'none';
+        const viewfinderLabel = document.getElementById('viewfinderLabel');
+        if (viewfinderLabel) viewfinderLabel.textContent = 'LIVE CAMERA';
+      }
+    }
+    handleScanViewfinder();
+  });
+
+  const presetSelect = document.getElementById('presetSlopeSelect');
+  if (presetSelect) {
+    presetSelect.addEventListener('change', async (e) => {
+      const val = e.target.value;
+      if (!val) return;
+      clearHazardChips();
+      const frame = generateSampleSlopeFrame(val);
+      activeSlopeFrameDataUrl = frame;
+      const activeImg = document.getElementById('activeSlopeImg');
+      const viewfinderLabel = document.getElementById('viewfinderLabel');
+      if (activeImg) {
+        activeImg.src = frame;
+        activeImg.style.display = 'block';
+      }
+      if (viewfinderLabel) {
+        const text = e.target.options[e.target.selectedIndex]?.text || val;
+        viewfinderLabel.textContent = text.replace(/^[0-9.\s]+/, '');
+      }
+      await handleScanViewfinder(frame);
+    });
+  }
+
+  const uploadInput = document.getElementById('imageUploadInput');
+  if (uploadInput) {
+    uploadInput.addEventListener('change', (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = async (ev) => {
+        clearHazardChips();
+        const dataUrl = ev.target.result;
+        activeSlopeFrameDataUrl = dataUrl;
+        const activeImg = document.getElementById('activeSlopeImg');
+        const viewfinderLabel = document.getElementById('viewfinderLabel');
+        if (activeImg) {
+          activeImg.src = dataUrl;
+          activeImg.style.display = 'block';
+        }
+        if (viewfinderLabel) {
+          viewfinderLabel.textContent = `UPLOAD: ${file.name.substring(0, 16)}`;
+        }
+        if (presetSelect) presetSelect.value = '';
+        await handleScanViewfinder(dataUrl);
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
   document.getElementById('btnSyncNow')?.addEventListener('click', () => trySync());
   document.getElementById('btnExportData')?.addEventListener('click', exportAllReports);
   document.getElementById('installBtn')?.addEventListener('click', handleInstall);

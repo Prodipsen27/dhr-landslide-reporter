@@ -292,6 +292,7 @@
 <!-- Local Vendorized QR libraries (100% offline air-gapped) -->
 <script src="./qrcode.min.js"></script>
 <script src="./jsqr.min.js"></script>
+<script src="./mesh-protocol.js"></script>
 
 <script>
 'use strict';
@@ -405,12 +406,9 @@ document.getElementById('btnGenerateDirectQR')?.addEventListener('click', () => 
   if (!alertText) { log('Enter or select an alert message first.'); return; }
 
   closePeer();
-  const payload = JSON.stringify({
-    v: 1,
-    type: 'direct_alert',
-    text: alertText,
-    ts: Date.now()
-  });
+
+  window.meshPayload.text = alertText;
+  const payload = MeshRouter.createOutgoing(window.meshPayload, 3);
 
   renderQR(payload);
   const qrWrap = document.getElementById('qrWrap');
@@ -447,7 +445,10 @@ document.getElementById('btnGenerateOffer').addEventListener('click', async () =
   dc.onopen = () => {
     setConn('connected');
     log('Data channel open — sending alert…');
-    dc.send(JSON.stringify({ type: 'alert', text: alertText }));
+    // Ensure payload text is up to date with textarea
+    window.meshPayload.text = alertText;
+    const packetString = MeshRouter.createOutgoing(window.meshPayload, 3);
+    dc.send(packetString);
     log('Alert sent! Receiver should see it now.');
   };
   dc.onerror = (e) => log('Data channel error: ' + e.message);
@@ -606,6 +607,13 @@ async function handleScannedQR(data) {
     try { parsed = JSON.parse(data); } catch {}
 
     if (parsed) {
+      if (parsed.i && parsed.t !== undefined && parsed.p) {
+        // Looks like a MeshPacket!
+        const packet = MeshRouter.processIncoming(data);
+        if (packet) showAlertFromPacket(packet);
+        log('⚡ Direct Hazard Alert (MeshPacket) received via optical QR scan!', logEl);
+        return;
+      }
       if (parsed.type === 'direct_alert' || parsed.type === 'alert' || parsed.alert) {
         showAlert(parsed.text || parsed.alert || data);
         log('⚡ Direct Hazard Alert received via optical QR scan!', logEl);
@@ -644,8 +652,8 @@ async function handleOfferQR(data) {
       const ch = e.channel;
       ch.onmessage = (ev) => {
         try {
-          const msg = JSON.parse(ev.data);
-          if (msg.type === 'alert') showAlert(msg.text);
+          const packet = MeshRouter.processIncoming(ev.data);
+          if (packet) showAlertFromPacket(packet);
         } catch {}
       };
       ch.onopen = () => log('Connected to sender over local peer channel!', logEl);
@@ -724,6 +732,45 @@ function showAnswerQR(payload, logEl) {
   }, 100);
 }
 
+function showAlertFromPacket(packet) {
+  const box = document.getElementById('alertBox');
+  const p = packet.payload;
+
+  // Format the rich content
+  let richContent = `${p.text}`;
+
+  if (p.severity || (p.tags && p.tags.length)) {
+    richContent += `\n\n[Severity: ${p.severity.toUpperCase()}]`;
+  }
+
+  if (p.tags && p.tags.length && p.tags[0] !== "") {
+    richContent += `\n[Tags: ${p.tags.join(', ')}]`;
+  }
+
+  if (p.lat && p.lon) {
+    richContent += `\n[Location: ${p.lat}, ${p.lon}]`;
+  }
+
+  document.getElementById('alertContent').textContent = richContent;
+  box.classList.add('visible');
+
+  // Speak the alert using Web Speech API if available
+  if ('speechSynthesis' in window) {
+    const utt = new SpeechSynthesisUtterance('Hazard alert: ' + p.text);
+    utt.lang = 'en-IN';
+    utt.rate = 0.9;
+    speechSynthesis.speak(utt);
+  }
+
+  // Rebroadcast automatically if TTL allows (for WebRTC/Bluetooth mesh)
+  if (packet.ttl > 0 && dc && dc.readyState === 'open') {
+    // We would need a more complex mesh map to broadcast to ALL peers,
+    // but in a simplified 1-to-1 WebRTC, just echoing back isn't helpful.
+    // In a real mesh, we iterate over all active data channels.
+    console.log('Would rebroadcast to mesh... TTL:', packet.ttl);
+  }
+}
+
 function showAlert(text) {
   const box = document.getElementById('alertBox');
   document.getElementById('alertContent').textContent = text;
@@ -768,6 +815,36 @@ function updateBleSupportBadge() {
     badge.className = 'status-pill offline';
     text.textContent = 'BLE NOT SUPPORTED IN THIS BROWSER (USE CHROME)';
     logBle('Web Bluetooth is not supported in this browser (common on iOS Safari). Use WebRTC Hotspot mode above or Chrome on Android/Desktop.');
+  }
+}
+
+function showBleAlertFromPacket(packet, nodeName) {
+  const box = document.getElementById('bleAlertBox');
+  const content = document.getElementById('bleAlertContent');
+  const origin = document.getElementById('bleNodeOrigin');
+
+  const p = packet.payload;
+  let richContent = `${p.text}`;
+
+  if (p.severity || (p.tags && p.tags.length)) {
+    richContent += `\n\n[Severity: ${p.severity.toUpperCase()}]`;
+  }
+  if (p.tags && p.tags.length && p.tags[0] !== "") {
+    richContent += `\n[Tags: ${p.tags.join(', ')}]`;
+  }
+  if (p.lat && p.lon) {
+    richContent += `\n[Location: ${p.lat}, ${p.lon}]`;
+  }
+
+  if (box && content) {
+    content.textContent = richContent;
+    if (origin) origin.textContent = 'NODE: ' + (nodeName || 'ESP32-MESH');
+    box.style.display = 'block';
+  }
+  if ('speechSynthesis' in window) {
+    const utt = new SpeechSynthesisUtterance('Emergency Bluetooth alert: ' + p.text);
+    utt.lang = 'en-IN';
+    speechSynthesis.speak(utt);
   }
 }
 
@@ -828,7 +905,9 @@ async function broadcastViaBle() {
 
     if (txChar) {
       logBle('Broadcasting alert packets over BLE GATT…');
-      const payload = new TextEncoder().encode(JSON.stringify({ type: 'alert', text, ts: Date.now() }));
+      window.meshPayload.text = text;
+      const packetStr = MeshRouter.createOutgoing(window.meshPayload, 3);
+      const payload = new TextEncoder().encode(packetStr);
       const CHUNK_SIZE = 20; // MTU-safe chunk size for BLE 4.x
       for (let i = 0; i < payload.length; i += CHUNK_SIZE) {
         await txChar.writeValue(payload.slice(i, i + CHUNK_SIZE));
@@ -884,14 +963,17 @@ async function receiveViaBle() {
         const chunk = new TextDecoder().decode(ev.target.value);
         buffer += chunk;
         try {
-          const parsed = JSON.parse(buffer);
-          if (parsed.type === 'alert') {
-            showBleAlert(parsed.text, device.name);
-            logBle(`⚠️ Alert received from "${device.name}"!`);
+          const packet = MeshRouter.processIncoming(buffer);
+          if (packet) {
+            showBleAlertFromPacket(packet, device.name);
+            logBle(`⚠️ Mesh Packet received from "${device.name}"!`);
+            buffer = ''; // reset after successful parse
+          } else if (JSON.parse(buffer)) {
+            // It parsed correctly but was rejected by MeshRouter (e.g. duplicate)
             buffer = '';
           }
         } catch {
-          // Packet buffer not finished
+          // Packet buffer not finished (JSON.parse threw exception)
         }
       });
       logBle(`Subscribed to emergency notifications from "${device.name}". Waiting for packets…`);
@@ -940,6 +1022,7 @@ document.querySelectorAll('#alertPresets .preset-chip').forEach((btn) => {
 });
 
 // ─── URL Query Parameter Handler (From SlopeWatch Observation) ───────────────
+window.meshPayload = { text: '', severity: 'medium', lat: null, lon: null, tags: [] };
 try {
   const urlParams = new URLSearchParams(window.location.search);
   const incoming = urlParams.get('alert') || urlParams.get('text');
@@ -950,6 +1033,13 @@ try {
     if (alertInput) alertInput.value = decoded;
     if (bleInput) bleInput.value = decoded;
     log('Loaded hazard alert from SlopeWatch field observation.');
+
+    // Store rich data if present
+    window.meshPayload.text = decoded;
+    if (urlParams.get('lat')) window.meshPayload.lat = urlParams.get('lat');
+    if (urlParams.get('lon')) window.meshPayload.lon = urlParams.get('lon');
+    if (urlParams.get('sev')) window.meshPayload.severity = decodeURIComponent(urlParams.get('sev'));
+    if (urlParams.get('tags')) window.meshPayload.tags = decodeURIComponent(urlParams.get('tags')).split(',');
   }
 } catch (e) {}
 </script>

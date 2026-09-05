@@ -1,10 +1,11 @@
 // Bump this on every deploy so old caches get cleared.
-const CACHE_NAME = 'slopewatch-v8';
+const CACHE_NAME = 'slopewatch-v9';
 const CORE_ASSETS = [
   './',
   './index.html',
   './relay.html',
   './app.js',
+  './mesh-protocol.js',
   './manifest.json',
   './qrcode.min.js',
   './jsqr.min.js',
