@@ -404,6 +404,104 @@ const HAZARD_ADVICE = {
   }
 };
 
+// ─── Pre-Seeded Hill Corridor Knowledge Base (Small-Scale Offline RAG) ───────
+//
+// Zero-latency spatial and keyword matching linking observations to historical
+// geotechnical risk corridors in the Darjeeling-Kalimpong-Teesta hills.
+
+const HILL_MILESTONES = [
+  {
+    name: 'Paglajhora Sinking Zone (NH-55)',
+    lat: 26.8833, lng: 88.2833, radiusKm: 3.5,
+    keywords: ['paglajhora', 'sinking', 'nh-55', 'nh55', 'pankhabari', 'gayabari', 'kurseong road', 'dhr track'],
+    geology: 'Known deep-seated historical debris slide corridor on unstable mica-schist bedrock. Chronic toe erosion by mountain jhoras during heavy monsoon bursts.'
+  },
+  {
+    name: 'Batasia Loop / Ghum Ridge',
+    lat: 27.0167, lng: 88.2500, radiusKm: 3.0,
+    keywords: ['batasia', 'ghum', 'ghoom', 'loop', 'hill cart', 'dhr track', 'jalapahar'],
+    geology: 'High-elevation weathered phyllite and loam overburden. Steep road embankments and railway cuts prone to shallow rotational shear slips.'
+  },
+  {
+    name: 'Tindharia Workshop & Slopes',
+    lat: 26.8500, lng: 88.3333, radiusKm: 3.0,
+    keywords: ['tindharia', 'workshop', 'chunbhatti', 'nh-55'],
+    geology: 'Severely sheared rock mass along steep gorge walls. High susceptibility to debris slides after prolonged antecedent rainfall saturation.'
+  },
+  {
+    name: 'NH-10 km 29 / Rambhi / Teesta Valley',
+    lat: 27.0167, lng: 88.4333, radiusKm: 4.5,
+    keywords: ['nh-10', 'nh10', 'rambhi', 'teesta', 'kalijhora', 'corridor', '29th mile'],
+    geology: 'Active toe-cutting by swelling Teesta River rapids. Loose quartzite and phyllite scree slopes with high frequency of sudden boulder detachment.'
+  },
+  {
+    name: 'Dudhia Bridge & Balason Basin',
+    lat: 26.7833, lng: 88.2333, radiusKm: 4.0,
+    keywords: ['dudhia', 'balason', 'mirik road', 'panighatta', 'mechi'],
+    geology: 'Piedmont alluvial terrace prone to lateral stream undercutting and rapid flash floods during late-monsoon cloudbursts.'
+  },
+  {
+    name: 'Mirik Lake & Basti Slopes',
+    lat: 26.8872, lng: 88.1883, radiusKm: 3.5,
+    keywords: ['mirik', 'mirik lake', 'basti', 'soureni', 'tingling', 'dhar gaon'],
+    geology: 'Heavily terraced tea estate slopes with thick weathered regolith. Infiltration overload triggers planar mudslides during saturated October spells.'
+  },
+  {
+    name: 'Teesta Bazaar & Kalimpong Link',
+    lat: 27.0667, lng: 88.4667, radiusKm: 4.0,
+    keywords: ['teesta bazaar', 'kalimpong', 'peshok', 'melli', 'chitrey'],
+    geology: 'Steep canyon wall junction with intense groundwater pore pressure buildup. Highly vulnerable to road-cutting failures and river surge isolation.'
+  }
+];
+
+function haversineDistanceKm(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+function findLocalGeologicalContext(location, notes) {
+  const notesLower = (notes || '').toLowerCase();
+
+  // 1. Proximity matching by GPS coordinates
+  if (location && typeof location.lat === 'number' && typeof location.lng === 'number') {
+    for (const m of HILL_MILESTONES) {
+      const dist = haversineDistanceKm(location.lat, location.lng, m.lat, m.lng);
+      if (dist <= m.radiusKm) {
+        return {
+          milestone: m.name,
+          distanceKm: dist.toFixed(1),
+          geology: m.geology,
+          matchType: 'gps'
+        };
+      }
+    }
+  }
+
+  // 2. Keyword matching from observer notes / landmarks
+  if (notesLower) {
+    for (const m of HILL_MILESTONES) {
+      for (const kw of m.keywords) {
+        if (notesLower.includes(kw)) {
+          return {
+            milestone: m.name,
+            distanceKm: null,
+            geology: m.geology,
+            matchType: 'keyword'
+          };
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
 // ─── On-device LLM (Lazy-loaded On Demand) ───────────────────────────────────
 //
 // Strategy:
@@ -463,6 +561,10 @@ async function runOnDemandAI(severity, notes, lang, location, hazardFlags, visio
   }
   if (location) {
     prompt += `Location: approximately ${location.lat.toFixed(4)}°N, ${location.lng.toFixed(4)}°E. `;
+  }
+  const geo = findLocalGeologicalContext(location, notes);
+  if (geo) {
+    prompt += `Regional Geological Zone (${geo.milestone}): ${geo.geology} `;
   }
   prompt += `In ${langLabel}, write 2 short sentences: what this likely means, and what the person should do right now.`;
 
@@ -601,6 +703,8 @@ async function exportAllReports() {
         precursors: r.hazardFlags || [],
         visionSummary: r.visionSummary || null,
         notes: r.notes || '',
+        geologicalZone: r.geoContext ? r.geoContext.milestone : null,
+        geologicalNotes: r.geoContext ? r.geoContext.geology : null,
         explanation: r.explanation,
         createdAt: new Date(r.createdAt).toISOString(),
         synced: r.synced === 1
@@ -761,6 +865,13 @@ async function renderReportList() {
       visionPill.className = 'report-vision-pill';
       visionPill.textContent = `🔍 AI Vision: ${r.visionSummary}`;
       li.appendChild(visionPill);
+    }
+
+    if (r.geoContext) {
+      const geoPill = document.createElement('div');
+      geoPill.className = 'report-geo-pill';
+      geoPill.textContent = `📍 Zone: ${r.geoContext.milestone} — ${r.geoContext.geology}`;
+      li.appendChild(geoPill);
     }
 
     if (r.hazardFlags && r.hazardFlags.length > 0) {
@@ -1076,6 +1187,7 @@ async function handleSubmit(e) {
     }
 
     const location = await getLocation();
+    const geoContext = findLocalGeologicalContext(location, notes);
 
     // Primary output: Verified instant disaster-grade template (0ms, 0MB)
     const fallback = SEVERITY_TEMPLATES[suggestedSeverity];
@@ -1099,6 +1211,7 @@ async function handleSubmit(e) {
       severity: suggestedSeverity,
       hazardFlags,
       visionSummary,
+      geoContext,
       notes,
       lang,
       photo,
