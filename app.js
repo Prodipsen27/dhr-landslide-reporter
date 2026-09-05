@@ -526,7 +526,7 @@ window.TRANSFORMERS_CONFIG = {
   apiKey: 'dummy',
   device: 'wasm',
   dtype: 'q8', // q8 is standard for these, or we can use q4f16
-  modelName: 'onnx-community/gemma-3-1b-it-ONNX-GQA',
+  modelName: 'onnx-community/gemma-3-270m-it-ONNX',
   env: {
     allowRemoteModels: true,
     useBrowserCache: true
