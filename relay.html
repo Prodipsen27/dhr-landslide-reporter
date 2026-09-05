@@ -736,6 +736,9 @@ function showAlertFromPacket(packet) {
   const box = document.getElementById('alertBox');
   const p = packet.payload;
 
+  // Trigger intense haptic pattern for emergency alert
+  if ('vibrate' in navigator) navigator.vibrate([200, 100, 200, 100, 500]);
+
   // Format the rich content
   let richContent = `${p.text}`;
 
@@ -822,6 +825,9 @@ function showBleAlertFromPacket(packet, nodeName) {
   const box = document.getElementById('bleAlertBox');
   const content = document.getElementById('bleAlertContent');
   const origin = document.getElementById('bleNodeOrigin');
+
+  // Trigger intense haptic pattern for emergency alert
+  if ('vibrate' in navigator) navigator.vibrate([200, 100, 200, 100, 500]);
 
   const p = packet.payload;
   let richContent = `${p.text}`;
@@ -1020,6 +1026,30 @@ document.querySelectorAll('#alertPresets .preset-chip').forEach((btn) => {
     log('Loaded preset: ' + btn.textContent.trim());
   });
 });
+
+// ─── Mobile-First Hardware APIs (WakeLock & Haptics) ──────────────────────────
+let wakeLock = null;
+async function requestWakeLock() {
+  if ('wakeLock' in navigator) {
+    try {
+      wakeLock = await navigator.wakeLock.request('screen');
+      log('📱 WakeLock active: Screen will stay on to maintain mesh relay.');
+      wakeLock.addEventListener('release', () => log('WakeLock released.'));
+    } catch (err) {
+      console.warn('WakeLock failed:', err);
+    }
+  }
+}
+
+// Re-request wake lock when tab becomes visible again
+document.addEventListener('visibilitychange', async () => {
+  if (wakeLock !== null && document.visibilityState === 'visible') {
+    await requestWakeLock();
+  }
+});
+
+// Request immediately
+requestWakeLock();
 
 // ─── URL Query Parameter Handler (From SlopeWatch Observation) ───────────────
 window.meshPayload = { text: '', severity: 'medium', lat: null, lon: null, tags: [] };

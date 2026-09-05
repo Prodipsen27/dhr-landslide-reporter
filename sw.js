@@ -1,5 +1,5 @@
 // Bump this on every deploy so old caches get cleared.
-const CACHE_NAME = 'slopewatch-v9';
+const CACHE_NAME = 'slopewatch-v10';
 const CORE_ASSETS = [
   './',
   './index.html',

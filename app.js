@@ -532,19 +532,47 @@ const QWEN_GGUF_URL = 'https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/re
 
 // Check Gemini Nano availability passively on load (0 bytes, instant)
 async function checkGeminiNanoReady() {
-  if (!('LanguageModel' in self)) return;
+  const statusPill = document.getElementById('tierGeminiNanoStatus');
+
+  let avail = 'unavailable';
+
   try {
-    const avail = await LanguageModel.availability();
+    if ('LanguageModel' in self && typeof LanguageModel.availability === 'function') {
+      avail = await LanguageModel.availability();
+    } else if (typeof ai !== 'undefined' && ai.languageModel) {
+      const caps = await ai.languageModel.capabilities();
+      avail = caps?.available || 'unavailable';
+    }
+  } catch {}
+
+  if (statusPill) {
     if (avail === 'readily') {
-      llmSession = await LanguageModel.create({
+      statusPill.className = 'status-pill online';
+      statusPill.textContent = 'READY (HARDWARE ACCELERATED)';
+    } else if (avail === 'after-download') {
+      statusPill.className = 'status-pill online';
+      statusPill.textContent = 'READY AFTER DOWNLOAD';
+    } else {
+      statusPill.className = 'status-pill offline';
+      statusPill.textContent = 'UNAVAILABLE (OFFLINE/FLAG OFF)';
+    }
+  }
+
+  if (avail === 'readily' || avail === 'after-download') {
+    try {
+      llmSession = await (typeof LanguageModel !== 'undefined' ? LanguageModel.create({
         systemPrompt: SYSTEM_PROMPT,
         temperature: 0.3,
         topK: 3
-      });
+      }) : ai.languageModel.create({
+        systemPrompt: SYSTEM_PROMPT
+      }));
       llmBackend = 'gemini-nano';
       updateAIBadge('gemini-nano');
+    } catch (e) {
+      console.warn('Gemini Nano session init error:', e);
     }
-  } catch {}
+  }
 }
 
 // On-demand AI generation (called ONLY when user taps "✨ Improve with AI")
@@ -642,20 +670,88 @@ async function runOnDemandAI(severity, notes, lang, location, hazardFlags, visio
   }
 }
 
-// ─── AI status badge ──────────────────────────────────────────────────────────
+// ─── AI status badge & WASM Preloader ──────────────────────────────────────────
+
+async function preloadWasmLLM() {
+  const btn = document.getElementById('btnPreloadWasm');
+  const progressWrap = document.getElementById('wasmPreloadProgress');
+  const textLabel = document.getElementById('wasmProgressText');
+  const pctLabel = document.getElementById('wasmProgressPct');
+  const barFill = document.getElementById('wasmProgressBarFill');
+  const statusPill = document.getElementById('tierWasmStatus');
+
+  if (btn) btn.style.display = 'none';
+  if (progressWrap) progressWrap.style.display = 'block';
+
+  function updateProgress(msg, pct) {
+    if (textLabel) textLabel.textContent = msg;
+    if (pctLabel) pctLabel.textContent = pct + '%';
+    if (barFill) barFill.style.width = pct + '%';
+  }
+
+  updateAIBadge('loading');
+
+  try {
+    updateProgress('Initializing Wllama WASM engine…', 10);
+    const { Wllama } = await import('https://cdn.jsdelivr.net/npm/@wllama/wllama@2.3.2/esm/index.js');
+    wllamaInstance = new Wllama(WLLAMA_CONFIG);
+
+    updateProgress('Connecting to Hugging Face model repository…', 20);
+    await wllamaInstance.loadModelFromUrl(QWEN_GGUF_URL, {
+      progressCallback: ({ loaded, total }) => {
+        if (total) {
+          const pct = Math.min(95, Math.max(20, Math.round((loaded / total) * 100)));
+          const mb = (loaded / (1024 * 1024)).toFixed(0);
+          const totMb = (total / (1024 * 1024)).toFixed(0);
+          updateProgress(`Downloading Qwen2.5-0.5B (${mb}/${totMb} MB)…`, pct);
+        }
+      }
+    });
+
+    llmBackend = 'wllama-qwen';
+    updateAIBadge('wllama-qwen');
+    updateProgress('Qwen2.5-0.5B loaded into browser RAM!', 100);
+
+    if (statusPill) {
+      statusPill.className = 'status-pill online';
+      statusPill.textContent = 'ACTIVE IN RAM (WASM)';
+    }
+
+    setTimeout(() => {
+      if (progressWrap) progressWrap.style.display = 'none';
+      if (btn) {
+        btn.style.display = 'block';
+        btn.textContent = '✅ Qwen2.5-0.5B Active in Browser';
+        btn.disabled = true;
+        btn.style.borderColor = 'rgba(74,222,128,0.5)';
+        btn.style.color = '#86efac';
+      }
+    }, 2000);
+  } catch (err) {
+    console.error('Preload WASM LLM failed:', err);
+    updateProgress('Download interrupted: ' + err.message, 100);
+    if (barFill) barFill.style.background = 'var(--high)';
+    updateAIBadge('edge-ai');
+    setTimeout(() => {
+      if (progressWrap) progressWrap.style.display = 'none';
+      if (btn) btn.style.display = 'block';
+    }, 4000);
+  }
+}
 
 function updateAIBadge(state) {
   const badge = document.getElementById('aiBadge');
   if (!badge) return;
-  const s = state || llmBackend || 'template';
+  const s = state || llmBackend || 'edge-ai';
   const MAP = {
-    'template':          { cls: 'ai-template', dot: '📋', label: 'TEMPLATE MODE' },
-    'gemini-nano':       { cls: 'ai-nano',     dot: '✦',  label: 'GEMINI NANO READY' },
-    'wllama-qwen':       { cls: 'ai-qwen',     dot: '⚡', label: 'QWEN-0.5B READY' },
-    'transformers-wasm': { cls: 'ai-wasm',     dot: '⚡', label: 'SMOLLM-135M READY' },
-    'loading':           { cls: 'ai-loading',  dot: '⏳', label: 'LOADING AI…' },
+    'edge-ai':           { cls: 'ai-geotechnical', dot: '⚡', label: 'EDGE AI (GEOTECHNICAL)' },
+    'template':          { cls: 'ai-geotechnical', dot: '⚡', label: 'EDGE AI (GEOTECHNICAL)' },
+    'gemini-nano':       { cls: 'ai-nano',         dot: '✦',  label: 'GEMINI NANO ACTIVE' },
+    'wllama-qwen':       { cls: 'ai-qwen',         dot: '⚡', label: 'QWEN-0.5B WASM ACTIVE' },
+    'transformers-wasm': { cls: 'ai-wasm',         dot: '⚡', label: 'SMOLLM-135M ACTIVE' },
+    'loading':           { cls: 'ai-loading',      dot: '⏳', label: 'LOADING ON-DEVICE AI…' },
   };
-  const cfg = MAP[s] || MAP['template'];
+  const cfg = MAP[s] || MAP['edge-ai'];
   badge.className = 'ai-badge ' + cfg.cls;
   badge.textContent = cfg.dot + ' ' + cfg.label;
 }
@@ -1484,7 +1580,7 @@ navigator.serviceWorker?.addEventListener('message', (event) => {
 
 window.addEventListener('DOMContentLoaded', () => {
   updateNetStatus();
-  updateAIBadge('template');
+  updateAIBadge('edge-ai');
   checkGeminiNanoReady();
   warmLocation();
   startCamera();
@@ -1552,6 +1648,26 @@ window.addEventListener('DOMContentLoaded', () => {
       reader.readAsDataURL(file);
     });
   }
+
+  // AI Architecture Inspector Modal
+  const aiModal = document.getElementById('aiInspectorModal');
+  const aiBadge = document.getElementById('aiBadge');
+  const closeAiModal = document.getElementById('btnCloseAiModal');
+
+  aiBadge?.addEventListener('click', () => {
+    checkGeminiNanoReady();
+    if (aiModal) aiModal.style.display = 'flex';
+  });
+
+  closeAiModal?.addEventListener('click', () => {
+    if (aiModal) aiModal.style.display = 'none';
+  });
+
+  aiModal?.addEventListener('click', (e) => {
+    if (e.target === aiModal) aiModal.style.display = 'none';
+  });
+
+  document.getElementById('btnPreloadWasm')?.addEventListener('click', preloadWasmLLM);
 
   document.getElementById('btnSyncNow')?.addEventListener('click', () => trySync());
   document.getElementById('btnExportData')?.addEventListener('click', exportAllReports);
