@@ -525,8 +525,8 @@ const SYSTEM_PROMPT =
 window.TRANSFORMERS_CONFIG = {
   apiKey: 'dummy',
   device: 'wasm',
-  dtype: 'q8',
-  modelName: 'HuggingFaceTB/SmolLM2-135M-Instruct',
+  dtype: 'q8', // q8 is standard for these, or we can use q4f16
+  modelName: 'onnx-community/gemma-3-1b-it-ONNX-GQA',
   env: {
     allowRemoteModels: true,
     useBrowserCache: true
