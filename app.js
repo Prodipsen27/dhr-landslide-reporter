@@ -508,15 +508,12 @@ function findLocalGeologicalContext(location, notes) {
 // Strategy:
 //   1. Primary output: Curated disaster-grade templates (instant, 0 MB, verified).
 //   2. On-demand AI: Triggered ONLY when the user taps "✨ Improve with AI".
-//      - Fast Path: Chrome Gemini Nano (if 'readily' available, 0 MB, 1s)
-//      - Universal Path: Wllama + Qwen2.5-0.5B-Instruct (q2_k) via WebAssembly
-//      - Fallback: Transformers.js WASM (SmolLM2-135M)
+//      - Fast Path: Native Prompt API (Chrome Gemini Nano)
+//      - Universal Path: Official Prompt API Polyfill (Transformers.js WASM)
 //   3. Status badge: 'TEMPLATE MODE' by default on page load. Zero data downloaded.
 
 let llmBackend = 'template';
 let llmSession = null;
-let wllamaInstance = null;
-let tfPipeline = null;
 
 const SYSTEM_PROMPT =
   'You are a slope-safety advisor for the Darjeeling hills in West Bengal, India. ' +
@@ -524,16 +521,21 @@ const SYSTEM_PROMPT =
   'reading on a small phone screen. Always respond in the requested language only. ' +
   'Keep answers to exactly 2 short sentences.';
 
-const WLLAMA_CONFIG = {
-  'single-thread/wllama.wasm': 'https://cdn.jsdelivr.net/npm/@wllama/wllama@2.3.2/esm/single-thread/wllama.wasm',
-  'multi-thread/wllama.wasm': 'https://cdn.jsdelivr.net/npm/@wllama/wllama@2.3.2/esm/multi-thread/wllama.wasm',
+// Configure the official polyfill to use Transformers.js via WASM
+window.TRANSFORMERS_CONFIG = {
+  apiKey: 'dummy',
+  device: 'wasm',
+  dtype: 'q8',
+  modelName: 'HuggingFaceTB/SmolLM2-135M-Instruct',
+  env: {
+    allowRemoteModels: true,
+    useBrowserCache: true
+  }
 };
-const QWEN_GGUF_URL = 'https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q2_k.gguf';
 
-// Check Gemini Nano availability passively on load (0 bytes, instant)
+// Check native Gemini Nano availability passively on load (0 bytes, instant)
 async function checkGeminiNanoReady() {
   const statusPill = document.getElementById('tierGeminiNanoStatus');
-
   let avail = 'unavailable';
 
   try {
@@ -559,20 +561,48 @@ async function checkGeminiNanoReady() {
   }
 
   if (avail === 'readily' || avail === 'after-download') {
-    try {
-      llmSession = await (typeof LanguageModel !== 'undefined' ? LanguageModel.create({
-        systemPrompt: SYSTEM_PROMPT,
-        temperature: 0.3,
-        topK: 3
-      }) : ai.languageModel.create({
-        systemPrompt: SYSTEM_PROMPT
-      }));
-      llmBackend = 'gemini-nano';
-      updateAIBadge('gemini-nano');
-    } catch (e) {
-      console.warn('Gemini Nano session init error:', e);
-    }
+    llmBackend = 'gemini-nano';
+    updateAIBadge('gemini-nano');
   }
+}
+
+async function getOrInitPromptSession(onProgress) {
+  if (llmSession) return llmSession;
+
+  // If native API is NOT present, inject the polyfill dynamically
+  let isPolyfill = false;
+  if (typeof LanguageModel === 'undefined' && (typeof ai === 'undefined' || !ai.languageModel)) {
+    onProgress('Loading Prompt API Polyfill…', 10);
+    await import('https://cdn.jsdelivr.net/npm/prompt-api-polyfill@1.20.4/dist/prompt-api-polyfill.js');
+    isPolyfill = true;
+    llmBackend = 'polyfill-wasm';
+  } else if (llmBackend === 'template') {
+    llmBackend = 'gemini-nano';
+  }
+
+  updateAIBadge(isPolyfill ? 'loading' : 'gemini-nano');
+  onProgress('Initializing model session…', 30);
+
+  const factory = typeof LanguageModel !== 'undefined' ? LanguageModel : ai.languageModel;
+
+  llmSession = await factory.create({
+    systemPrompt: SYSTEM_PROMPT,
+    temperature: 0.3,
+    topK: 3,
+    monitor(m) {
+      m.addEventListener('downloadprogress', (e) => {
+        if (e.total) {
+          const pct = Math.min(95, Math.max(30, Math.round((e.loaded / e.total) * 100)));
+          const mb = (e.loaded / (1024 * 1024)).toFixed(1);
+          const tot = (e.total / (1024 * 1024)).toFixed(1);
+          onProgress(`Downloading WASM model (${mb}/${tot} MB)…`, pct);
+        }
+      });
+    }
+  });
+
+  updateAIBadge(llmBackend);
+  return llmSession;
 }
 
 // On-demand AI generation (called ONLY when user taps "✨ Improve with AI")
@@ -597,75 +627,14 @@ async function runOnDemandAI(severity, notes, lang, location, hazardFlags, visio
   }
   prompt += `In ${langLabel}, write 2 short sentences: what this likely means, and what the person should do right now.`;
 
-  // 1. Chrome Gemini Nano Fast Path (if present)
-  if (llmBackend === 'gemini-nano' && llmSession) {
-    onProgress('Synthesizing with Gemini Nano…', 90);
-    const text = await llmSession.prompt(prompt);
-    return { text: text.trim(), model: 'Gemini Nano' };
-  }
-
-  // 2. Wllama + Qwen2.5-0.5B-q2 Path
-  updateAIBadge('loading');
   try {
-    if (!wllamaInstance) {
-      onProgress('Initializing Wllama WASM runtime…', 10);
-      const { Wllama } = await import('https://cdn.jsdelivr.net/npm/@wllama/wllama@2.3.2/esm/index.js');
-      wllamaInstance = new Wllama(WLLAMA_CONFIG);
-      onProgress('Fetching Qwen2.5-0.5B-q2 model…', 20);
-      await wllamaInstance.loadModelFromUrl(QWEN_GGUF_URL, {
-        progressCallback: ({ loaded, total }) => {
-          if (total) {
-            const pct = Math.min(92, Math.max(20, Math.round((loaded / total) * 100)));
-            const mb = (loaded / (1024 * 1024)).toFixed(0);
-            const totMb = (total / (1024 * 1024)).toFixed(0);
-            onProgress(`Downloading Qwen2.5-0.5B (${mb}/${totMb} MB)…`, pct);
-          }
-        }
-      });
-    }
-    onProgress('Synthesizing on-device explanation…', 95);
-    const formatted = `<|im_start|>system\n${SYSTEM_PROMPT}<|im_end|>\n<|im_start|>user\n${prompt}<|im_end|>\n<|im_start|>assistant\n`;
-    const out = await wllamaInstance.createCompletion(formatted, {
-      nPredict: 90,
-      temperature: 0.3,
-      stopTokens: ['<|im_end|>', '<|endoftext|>']
-    });
-    llmBackend = 'wllama-qwen';
-    updateAIBadge('wllama-qwen');
-    return { text: out.trim(), model: 'Qwen2.5-0.5B (Wllama)' };
-  } catch (wErr) {
-    console.warn('Wllama failed, attempting Transformers.js WASM fallback:', wErr);
-  }
-
-  // 3. Transformers.js Fallback
-  try {
-    onProgress('Loading Transformers.js fallback…', 25);
-    const { pipeline, env } = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.4.2/dist/transformers.min.js');
-    env.allowRemoteModels = true;
-    env.useBrowserCache = true;
-    if (!tfPipeline) {
-      tfPipeline = await pipeline('text-generation', 'HuggingFaceTB/SmolLM2-135M-Instruct', {
-        device: 'wasm',
-        dtype: 'q4',
-        progress_callback: (info) => {
-          if (info.status === 'progress' && info.total) {
-            const pct = Math.min(92, Math.round((info.loaded / info.total) * 100));
-            onProgress(`Downloading SmolLM2 (${pct}%)…`, pct);
-          }
-        }
-      });
-    }
+    const session = await getOrInitPromptSession(onProgress);
     onProgress('Synthesizing advice…', 95);
-    const out = await tfPipeline([
-      { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: prompt }
-    ], { max_new_tokens: 80, temperature: 0.3 });
-    const text = out[0]?.generated_text?.at(-1)?.content ?? '';
-    llmBackend = 'transformers-wasm';
-    updateAIBadge('transformers-wasm');
-    return { text: text.trim(), model: 'SmolLM2-135M' };
-  } catch (tfErr) {
-    console.warn('All on-device LLMs failed:', tfErr);
+    const text = await session.prompt(prompt);
+    const modelName = llmBackend === 'gemini-nano' ? 'Gemini Nano' : 'SmolLM2 (Polyfill WASM)';
+    return { text: text.trim(), model: modelName };
+  } catch (err) {
+    console.warn('AI Session failed:', err);
     throw new Error('On-device model could not load (network or memory limit).');
   }
 }
@@ -685,32 +654,18 @@ async function preloadWasmLLM() {
 
   function updateProgress(msg, pct) {
     if (textLabel) textLabel.textContent = msg;
-    if (pctLabel) pctLabel.textContent = pct + '%';
-    if (barFill) barFill.style.width = pct + '%';
+    if (pctLabel) pctLabel.textContent = typeof pct === 'number' ? pct + '%' : pct;
+    if (barFill && typeof pct === 'number') barFill.style.width = pct + '%';
   }
 
   updateAIBadge('loading');
 
   try {
-    updateProgress('Initializing Wllama WASM engine…', 10);
-    const { Wllama } = await import('https://cdn.jsdelivr.net/npm/@wllama/wllama@2.3.2/esm/index.js');
-    wllamaInstance = new Wllama(WLLAMA_CONFIG);
+    // Calling getOrInitPromptSession with our own progress updater
+    // This will force the download in the background without making an actual prompt
+    await getOrInitPromptSession(updateProgress);
 
-    updateProgress('Connecting to Hugging Face model repository…', 20);
-    await wllamaInstance.loadModelFromUrl(QWEN_GGUF_URL, {
-      progressCallback: ({ loaded, total }) => {
-        if (total) {
-          const pct = Math.min(95, Math.max(20, Math.round((loaded / total) * 100)));
-          const mb = (loaded / (1024 * 1024)).toFixed(0);
-          const totMb = (total / (1024 * 1024)).toFixed(0);
-          updateProgress(`Downloading Qwen2.5-0.5B (${mb}/${totMb} MB)…`, pct);
-        }
-      }
-    });
-
-    llmBackend = 'wllama-qwen';
-    updateAIBadge('wllama-qwen');
-    updateProgress('Qwen2.5-0.5B loaded into browser RAM!', 100);
+    updateProgress('Model loaded into browser RAM!', 100);
 
     if (statusPill) {
       statusPill.className = 'status-pill online';
@@ -721,7 +676,7 @@ async function preloadWasmLLM() {
       if (progressWrap) progressWrap.style.display = 'none';
       if (btn) {
         btn.style.display = 'block';
-        btn.textContent = '✅ Qwen2.5-0.5B Active in Browser';
+        btn.textContent = '✅ WASM Polyfill Active';
         btn.disabled = true;
         btn.style.borderColor = 'rgba(74,222,128,0.5)';
         btn.style.color = '#86efac';
@@ -731,7 +686,7 @@ async function preloadWasmLLM() {
     console.error('Preload WASM LLM failed:', err);
     updateProgress('Download interrupted: ' + err.message, 100);
     if (barFill) barFill.style.background = 'var(--high)';
-    updateAIBadge('edge-ai');
+    updateAIBadge('template');
     setTimeout(() => {
       if (progressWrap) progressWrap.style.display = 'none';
       if (btn) btn.style.display = 'block';
@@ -747,8 +702,7 @@ function updateAIBadge(state) {
     'edge-ai':           { cls: 'ai-geotechnical', dot: '⚡', label: 'EDGE AI (GEOTECHNICAL)' },
     'template':          { cls: 'ai-geotechnical', dot: '⚡', label: 'EDGE AI (GEOTECHNICAL)' },
     'gemini-nano':       { cls: 'ai-nano',         dot: '✦',  label: 'GEMINI NANO ACTIVE' },
-    'wllama-qwen':       { cls: 'ai-qwen',         dot: '⚡', label: 'QWEN-0.5B WASM ACTIVE' },
-    'transformers-wasm': { cls: 'ai-wasm',         dot: '⚡', label: 'SMOLLM-135M ACTIVE' },
+    'polyfill-wasm':     { cls: 'ai-wasm',         dot: '⚡', label: 'WASM POLYFILL ACTIVE' },
     'loading':           { cls: 'ai-loading',      dot: '⏳', label: 'LOADING ON-DEVICE AI…' },
   };
   const cfg = MAP[s] || MAP['edge-ai'];

@@ -1176,18 +1176,18 @@
   <div class="vision-action-bar" style="display:flex;gap:0.5rem;flex-direction:column">
     <button type="button" id="btnScanImage" class="btn-vision-scan">
       <span>🔍</span>
-      <span>AI Visual Scan (Live Camera / Active Frame)</span>
+      <span>Take Photo & AI Scan</span>
     </button>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.4rem">
       <label for="imageUploadInput" class="btn-subtle" style="text-align:center;justify-content:center;cursor:pointer;padding:0.45rem">
-        📁 Upload Slope Photo
+        📁 Upload Photo
       </label>
       <input type="file" id="imageUploadInput" accept="image/*" style="display:none">
       <select id="presetSlopeSelect" class="btn-subtle" style="padding:0.45rem;cursor:pointer;width:100%">
-        <option value="">🧪 Test Field Scenarios…</option>
+        <option value="">🧪 Test Scenarios…</option>
         <option value="crack">1. ⚡ Batasia Tension Crack</option>
         <option value="tree">2. 🌲 Paglajhora Tilted Trees</option>
-        <option value="debris">3. 🪨 NH-10 Rockfall & Talus</option>
+        <option value="debris">3. 🪨 NH-10 Rockfall</option>
         <option value="stable">4. 🌿 Stable Grassy Slope</option>
       </select>
     </div>
@@ -1196,13 +1196,13 @@
   <!-- Vision Analysis Results Card -->
   <div id="visionResultsPanel" class="vision-results-panel" style="display:none">
     <div class="vision-results-header">
-      <span class="vision-results-title">🧠 On-Device Multi-Model Vision</span>
+      <span class="vision-results-title">🧠 AI Scan Results</span>
       <span id="visionOverallStatus" class="vision-status-tag">HAZARDS IDENTIFIED</span>
     </div>
 
     <!-- MediaPipe Neural Classification Output -->
     <div style="display:flex;flex-direction:column;gap:0.25rem">
-      <span style="font-size:0.72rem;color:var(--muted);font-weight:700">MediaPipe Neural Labels (EfficientNet-Lite):</span>
+      <span style="font-size:0.72rem;color:var(--muted);font-weight:700">Identified Objects:</span>
       <div id="visionNeuralLabels" class="neural-labels-wrap">
         <span class="neural-pill">Evaluating frame…</span>
       </div>
@@ -1210,17 +1210,17 @@
 
     <!-- Geotechnical Geometric Physics Telemetry -->
     <div style="display:flex;flex-direction:column;gap:0.25rem">
-      <span style="font-size:0.72rem;color:var(--muted);font-weight:700">Geotechnical Failure Telemetry:</span>
+      <span style="font-size:0.72rem;color:var(--muted);font-weight:700">Danger Signs:</span>
       <div id="visionDetectionsList" class="vision-detections-list"></div>
     </div>
 
     <!-- Actual On-Device AI Diagnosis Box -->
     <div id="visionAiAdviceWrap" class="vision-ai-advice-wrap">
       <div class="vision-ai-header">
-        <span class="vision-ai-title">🤖 Local AI Geotechnical Diagnosis</span>
+        <span class="vision-ai-title">🤖 AI Safety Advice</span>
         <span id="visionAiModelBadge" class="vision-ai-badge">ON-DEVICE AI</span>
       </div>
-      <p id="visionAiAdviceText" class="vision-ai-text">Synthesizing edge AI response…</p>
+      <p id="visionAiAdviceText" class="vision-ai-text">Thinking…</p>
     </div>
   </div>
 
@@ -1308,64 +1308,64 @@
       <div class="modal-header">
         <div style="display:flex;align-items:center;gap:0.5rem">
           <span style="font-size:1.2rem">🧠</span>
-          <h2 style="font-size:1.02rem;font-weight:700;margin:0">On-Device AI Architecture & Telemetry</h2>
+          <h2 style="font-size:1.02rem;font-weight:700;margin:0">AI System Status</h2>
         </div>
         <button type="button" id="btnCloseAiModal" class="btn-subtle" style="width:auto;min-height:30px;padding:0.2rem 0.5rem;font-size:0.9rem">✕</button>
       </div>
       <p style="font-size:0.78rem;color:var(--muted);margin:0.4rem 0 0.8rem 0">
-        SlopeWatch uses a zero-latency, 100% air-gapped AI cascade designed for zero-network conditions in the Darjeeling hills. Reporting never freezes waiting for a heavy cloud or weights download.
+        SlopeWatch runs entirely on your phone. No internet connection is needed to stay safe in the hills.
       </p>
 
       <div style="display:flex;flex-direction:column;gap:0.55rem">
         <!-- Tier 1 -->
         <div class="ai-tier-item active">
           <div class="ai-tier-row">
-            <span class="ai-tier-title">1. MediaPipe Neural Vision (EfficientNet-Lite)</span>
+            <span class="ai-tier-title">1. AI Visual Scan</span>
             <span class="status-pill online" style="font-size:0.65rem">ACTIVE · ON-DEVICE</span>
           </div>
-          <p class="ai-tier-desc">Quantized neural classifier running in browser WebAssembly. Classifies terrain, scree, alp, timber, and geological features in under 15ms.</p>
+          <p class="ai-tier-desc">Instantly recognizes objects and terrain types through your camera.</p>
         </div>
 
         <!-- Tier 2 -->
         <div class="ai-tier-item active">
           <div class="ai-tier-row">
-            <span class="ai-tier-title">2. Geotechnical Physics CV Engine</span>
+            <span class="ai-tier-title">2. Slope Physics Engine</span>
             <span class="status-pill online" style="font-size:0.65rem">ACTIVE · 0ms LATENCY</span>
           </div>
-          <p class="ai-tier-desc">Calculates tension crack linear troughs, vegetative tilt gradient tensors (~28°-33°), and talus roughness variance blocks.</p>
+          <p class="ai-tier-desc">Measures crack lines, tilted trees, and dangerous rock shapes.</p>
         </div>
 
         <!-- Tier 3 -->
         <div class="ai-tier-item active">
           <div class="ai-tier-row">
-            <span class="ai-tier-title">3. Disaster Safety Decision Engine</span>
+            <span class="ai-tier-title">3. Emergency Safety Advice</span>
             <span class="status-pill online" style="font-size:0.65rem">ACTIVE · 100% AIR-GAPPED</span>
           </div>
-          <p class="ai-tier-desc">Synthesizes localized evacuation orders correlated with Darjeeling/Kalimpong geological milestones in English, Nepali, Hindi, and Bengali (0MB download).</p>
+          <p class="ai-tier-desc">Generates local safety steps in English, Nepali, Hindi, and Bengali.</p>
         </div>
 
         <!-- Tier 4 -->
         <div class="ai-tier-item" id="tierGeminiNanoWrap">
           <div class="ai-tier-row">
-            <span class="ai-tier-title">4. Chrome Built-in Gemini Nano (NPU/GPU)</span>
+            <span class="ai-tier-title">4. Hardware AI Assistant</span>
             <span id="tierGeminiNanoStatus" class="status-pill offline" style="font-size:0.65rem">UNAVAILABLE</span>
           </div>
           <p class="ai-tier-desc" id="tierGeminiNanoDesc">
-            Google's built-in 1.5GB Gemini Nano running on device hardware. If unavailable, enable in Chrome: <code>chrome://flags/#prompt-api-for-gemini-nano</code> and download in <code>chrome://components</code>.
+            Fast offline AI built into your browser. If not working, it may need to be enabled in Chrome settings.
           </p>
         </div>
 
         <!-- Tier 5 -->
         <div class="ai-tier-item" id="tierWasmWrap">
           <div class="ai-tier-row">
-            <span class="ai-tier-title">5. In-Browser WASM LLM (Qwen2.5-0.5B)</span>
+            <span class="ai-tier-title">5. Backup AI Assistant</span>
             <span id="tierWasmStatus" class="status-pill offline" style="font-size:0.65rem">STANDBY (ON-DEMAND)</span>
           </div>
-          <p class="ai-tier-desc">Runs quantized neural weights in browser RAM. Keeps phone battery and bandwidth safe until specifically loaded.</p>
-          
+          <p class="ai-tier-desc">A smaller AI that runs when the hardware assistant is not available.</p>
+
           <div id="wasmPreloadSection" style="margin-top:0.45rem">
             <button type="button" id="btnPreloadWasm" class="btn-subtle" style="width:100%;font-weight:700;font-size:0.8rem;padding:0.45rem;border-color:rgba(168,85,247,0.4);color:#d8b4fe">
-              🚀 Load Qwen2.5-0.5B WASM Model Now
+              🚀 Start Backup AI Now
             </button>
             <div id="wasmPreloadProgress" class="ai-progress-wrap" style="display:none;margin-top:0.4rem">
               <div style="display:flex;justify-content:space-between;align-items:center">
